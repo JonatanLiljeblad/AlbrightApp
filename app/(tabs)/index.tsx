@@ -29,20 +29,19 @@ export default function ScheduleScreen() {
   }
 
   async function refreshOnce() {
-    const ref = collection(db, 'schedule', date, 'slots');
-    const snap = await (await import('firebase/firestore')).getDocs(ref);
-    setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
+    try {
+      const ref = collection(db, 'schedule', date, 'slots');
+      const snap = await (await import('firebase/firestore')).getDocs(ref);
+      setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
+    } catch {
+      // Ignore permission errors; UI will still be usable after rules are set.
+    }
   }
 
   useEffect(() => {
     const ref = collection(db, 'schedule', date, 'slots');
-    const unsub = onSnapshot(
-      ref,
-      (snap) => setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
-      () => {
-        // Fall back to manual refresh if listener is blocked by rules.
-        refreshOnce();
-      }
+    const unsub = onSnapshot(ref, (snap) =>
+      setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() })))
     );
     return unsub;
   }, []);

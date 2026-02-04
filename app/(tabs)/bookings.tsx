@@ -30,7 +30,7 @@ export default function MyBookingsScreen() {
     if (!u) return;
     const q = query(collection(db, 'bookings'), where('userId', '==', u.uid));
     const unsub = onSnapshot(q, () => load());
-    return unsub;
+    return () => unsub();
   }, []);
 
   async function unbook() {
