@@ -48,8 +48,7 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true;
   const [user, setUser] = useState<import('firebase/auth').User | null>(null);
   const [ready, setReady] = useState(false);
   const segments = useSegments();
