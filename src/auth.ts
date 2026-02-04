@@ -1,4 +1,12 @@
-import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut, updateProfile, User } from 'firebase/auth';
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+  User,
+} from 'firebase/auth';
+import { Platform } from 'react-native';
 import { auth, db, ADMIN_EMAILS } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
@@ -26,7 +34,24 @@ export async function requestAccess(name: string, email: string) {
   );
 }
 
-export async function signIn(email: string, password: string) {
+async function applySignInPersistence(remember: boolean) {
+  try {
+    if (Platform.OS === 'web') {
+      const { setPersistence, browserLocalPersistence, browserSessionPersistence } = require('firebase/auth');
+      await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+      return;
+    }
+
+    const { setPersistence, inMemoryPersistence, getReactNativePersistence } = require('@firebase/auth');
+    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+    await setPersistence(auth, remember ? getReactNativePersistence(AsyncStorage) : inMemoryPersistence);
+  } catch {
+    // If persistence isn't supported for some reason, we still allow sign-in.
+  }
+}
+
+export async function signIn(email: string, password: string, remember: boolean) {
+  await applySignInPersistence(remember);
   return signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
 }
 
