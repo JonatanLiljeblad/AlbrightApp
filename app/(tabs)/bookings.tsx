@@ -6,8 +6,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { collection, deleteDoc, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 
 export default function MyBookingsScreen() {
-  const [busy, setBusy] = useState(false);
-  const [booking, setBooking] = useState<any | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [bookings, setBookings] = useState<any[]>([]);
 
   async function load() {
     const u = auth.currentUser;
@@ -22,7 +22,7 @@ export default function MyBookingsScreen() {
       return Number.isFinite(endMs) && endMs > now;
     });
     active.sort((a, b) => `${a.date}_${a.slot}`.localeCompare(`${b.date}_${b.slot}`));
-    setBooking(active[0] ?? null);
+    setBookings(active);
   }
 
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
@@ -39,21 +39,23 @@ export default function MyBookingsScreen() {
     return unsub;
   }, [uid]);
 
-  async function unbook() {
+  async function unbook(b: any) {
     const u = auth.currentUser;
-    if (!u || !booking) return;
+    if (!u || !b) return;
+
+    const key = `${b.date}_${b.slot}`;
 
     try {
-      setBusy(true);
-      const slotRef = doc(db, 'schedule', booking.date, 'slots', booking.slot);
-      const bookingRef = doc(db, 'bookings', `${booking.date}_${booking.slot}_${u.uid}`);
+      setBusyKey(key);
+      const slotRef = doc(db, 'schedule', b.date, 'slots', b.slot);
+      const bookingRef = doc(db, 'bookings', `${b.date}_${b.slot}_${u.uid}`);
       await deleteDoc(bookingRef);
       await deleteDoc(slotRef);
       await load();
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Failed to unbook');
     } finally {
-      setBusy(false);
+      setBusyKey(null);
     }
   }
 
@@ -61,18 +63,23 @@ export default function MyBookingsScreen() {
     <Card style={styles.card} mode="elevated">
       <Card.Title title="My bookings" />
       <Card.Content>
-        {!booking ? (
+        {bookings.length === 0 ? (
           <Text>You have no active bookings.</Text>
         ) : (
-          <>
-            <Text style={styles.big}>
-              {booking.date} — {booking.slot}
-            </Text>
-            <Text style={styles.muted}>Booked as {booking.name}</Text>
-            <Button mode="contained" onPress={unbook} loading={busy} disabled={busy} style={styles.btn}>
-              Unbook
-            </Button>
-          </>
+          bookings.map((b) => {
+            const key = `${b.date}_${b.slot}`;
+            const busy = busyKey === key;
+            return (
+              <Card key={key} style={styles.item} mode="outlined">
+                <Card.Title title={`${b.date} — ${b.slot}`} subtitle={`Booked as ${b.name}`} />
+                <Card.Actions>
+                  <Button mode="contained" onPress={() => unbook(b)} loading={busy} disabled={busy}>
+                    Unbook
+                  </Button>
+                </Card.Actions>
+              </Card>
+            );
+          })
         )}
       </Card.Content>
     </Card>
@@ -81,7 +88,5 @@ export default function MyBookingsScreen() {
 
 const styles = StyleSheet.create({
   card: { margin: 16, borderRadius: 16 },
-  big: { marginTop: 8, fontSize: 18 },
-  muted: { opacity: 0.7, marginTop: 4 },
-  btn: { marginTop: 14 },
+  item: { marginTop: 12, borderRadius: 14 },
 });
