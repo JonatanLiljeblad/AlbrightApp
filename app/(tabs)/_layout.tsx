@@ -2,8 +2,6 @@ import React, { useMemo } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Tabs } from 'expo-router';
 
-import Colors from '@/constants/Colors';
-import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import { auth } from '@/src/firebase';
 import { isAdmin } from '@/src/auth';
@@ -17,13 +15,16 @@ function TabBarIcon(props: {
 }
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
   const admin = useMemo(() => isAdmin(auth.currentUser?.email), [auth.currentUser?.email]);
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarActiveTintColor: '#D7263D',
+        tabBarInactiveTintColor: '#7A7A7A',
+        tabBarStyle: { backgroundColor: '#0B0B0B', borderTopColor: '#141414' },
+        headerStyle: { backgroundColor: '#0B0B0B' },
+        headerTintColor: '#FFFFFF',
         headerShown: useClientOnlyValue(false, true),
       }}>
       <Tabs.Screen

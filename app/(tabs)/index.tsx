@@ -5,7 +5,7 @@ import { auth, db } from '@/src/firebase';
 import { canBook } from '@/src/bookingRules';
 import { hourLabel, hourSlot, hoursRange, toYmd } from '@/src/time';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, onSnapshot, runTransaction } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot, runTransaction } from 'firebase/firestore';
 
 type SlotRow = { slot: string; label: string; bookedBy?: string };
 
@@ -81,7 +81,7 @@ export default function ScheduleScreen() {
   async function refreshOnce() {
     try {
       const ref = collection(db, 'schedule', date, 'slots');
-      const snap = await (await import('firebase/firestore')).getDocs(ref);
+      const snap = await getDocs(ref);
       setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
     } catch {
       // Ignore permission errors; UI will still be usable after rules are set.

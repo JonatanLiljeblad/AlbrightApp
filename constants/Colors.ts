@@ -11,9 +11,10 @@ export default {
   },
   dark: {
     text: '#FFFFFF',
-    background: '#0B0B0B',
+    background: '#000000',
     tint: tintColorDark,
-    tabIconDefault: '#8A8A8A',
+    tabIconDefault: '#7A7A7A',
     tabIconSelected: tintColorDark,
+    link: tintColorDark,
   },
 };

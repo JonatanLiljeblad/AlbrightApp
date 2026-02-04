@@ -3,7 +3,7 @@ import { Alert, StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { isAdmin } from '@/src/auth';
-import { collection, doc, getDocs, query, setDoc, where } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 
 export default function AdminScreen() {
   const [busy, setBusy] = useState(false);
@@ -17,6 +17,9 @@ export default function AdminScreen() {
 
   useEffect(() => {
     load();
+    const q = query(collection(db, 'accessRequests'), where('status', '==', 'pending'));
+    const unsub = onSnapshot(q, () => load());
+    return unsub;
   }, []);
 
   async function decide(email: string, allowed: boolean) {

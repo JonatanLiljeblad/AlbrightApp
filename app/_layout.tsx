@@ -1,13 +1,12 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { DarkTheme as NavDark, DefaultTheme as NavLight, ThemeProvider } from '@react-navigation/native';
+import { DarkTheme as NavDark, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useMemo, useState } from 'react';
 import 'react-native-reanimated';
-import { MD3DarkTheme, MD3LightTheme, PaperProvider } from 'react-native-paper';
+import { MD3DarkTheme, PaperProvider } from 'react-native-paper';
 
-import { useColorScheme } from '@/components/useColorScheme';
 import { watchAuth } from '@/src/auth';
 
 export {
@@ -48,7 +47,6 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
-  const isDark = true;
   const [user, setUser] = useState<import('firebase/auth').User | null>(null);
   const [ready, setReady] = useState(false);
   const segments = useSegments();
@@ -63,18 +61,49 @@ function RootLayoutNav() {
   }, []);
 
   const paperTheme = useMemo(() => {
-    const base = isDark ? MD3DarkTheme : MD3LightTheme;
+    const base = MD3DarkTheme;
     return {
       ...base,
+      roundness: 16,
       colors: {
         ...base.colors,
+        // Brand
         primary: '#D7263D',
+        onPrimary: '#FFFFFF',
+        primaryContainer: '#3A0B12',
+        onPrimaryContainer: '#FFFFFF',
+
         secondary: '#111111',
+        onSecondary: '#FFFFFF',
+        secondaryContainer: '#141414',
+        onSecondaryContainer: '#FFFFFF',
+
+        // App surfaces
+        background: '#000000',
+        surface: '#0B0B0B',
+        surfaceVariant: '#141414',
+        onSurface: '#FFFFFF',
+        onSurfaceVariant: '#E6E6E6',
+        outline: '#2A2A2A',
       },
     };
-  }, [isDark]);
+  }, []);
 
-  const navTheme = isDark ? NavDark : NavLight;
+  const navTheme = useMemo(
+    () => ({
+      ...NavDark,
+      colors: {
+        ...NavDark.colors,
+        primary: '#D7263D',
+        background: '#000000',
+        card: '#0B0B0B',
+        text: '#FFFFFF',
+        border: '#141414',
+        notification: '#D7263D',
+      },
+    }),
+    []
+  );
 
   useEffect(() => {
     if (!ready) return;
