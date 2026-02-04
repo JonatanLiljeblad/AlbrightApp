@@ -4,6 +4,7 @@ import { Button, Card, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { canBook } from '@/src/bookingRules';
 import { hourLabel, hourSlot, hoursRange, toYmd } from '@/src/time';
+import { onAuthStateChanged } from 'firebase/auth';
 import { collection, doc, onSnapshot, runTransaction } from 'firebase/firestore';
 
 type SlotRow = { slot: string; label: string; bookedBy?: string };
@@ -38,13 +39,22 @@ export default function ScheduleScreen() {
     }
   }
 
+  const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
+
+  useEffect(() => onAuthStateChanged(auth, (u) => setUid(u?.uid ?? null)), []);
+
   useEffect(() => {
+    if (!uid) return;
     const ref = collection(db, 'schedule', date, 'slots');
-    const unsub = onSnapshot(ref, (snap) =>
-      setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() })))
+    const unsub = onSnapshot(
+      ref,
+      (snap) => setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
+      () => {
+        // Ignore permission errors during auth transitions.
+      }
     );
     return unsub;
-  }, []);
+  }, [uid]);
 
   async function book(slot: string) {
     const u = auth.currentUser;

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { collection, deleteDoc, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 
 export default function MyBookingsScreen() {
@@ -24,14 +25,19 @@ export default function MyBookingsScreen() {
     setBooking(active[0] ?? null);
   }
 
+  const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
+
+  useEffect(() => onAuthStateChanged(auth, (u) => setUid(u?.uid ?? null)), []);
+
   useEffect(() => {
+    if (!uid) return;
     load();
-    const u = auth.currentUser;
-    if (!u) return;
-    const q = query(collection(db, 'bookings'), where('userId', '==', u.uid));
-    const unsub = onSnapshot(q, () => load());
-    return () => unsub();
-  }, []);
+    const q = query(collection(db, 'bookings'), where('userId', '==', uid));
+    const unsub = onSnapshot(q, () => load(), () => {
+      // Ignore permission errors during auth transitions.
+    });
+    return unsub;
+  }, [uid]);
 
   async function unbook() {
     const u = auth.currentUser;
