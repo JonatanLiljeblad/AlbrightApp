@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, StyleSheet, View } from 'react-native';
-import { Button, Card, ProgressBar, Text } from 'react-native-paper';
+import { Button, Card, IconButton, ProgressBar, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { canBook } from '@/src/bookingRules';
 import { hourLabel, hourSlot, hoursRange, toYmd } from '@/src/time';
@@ -10,10 +10,22 @@ import { collection, doc, onSnapshot, runTransaction } from 'firebase/firestore'
 type SlotRow = { slot: string; label: string; bookedBy?: string };
 
 export default function ScheduleScreen() {
-  const date = useMemo(() => toYmd(new Date()), []);
   const [rows, setRows] = useState<SlotRow[]>([]);
   const [busySlot, setBusySlot] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+
+  function startOfDay(d: Date) {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function addDays(d: Date, days: number) {
+    const x = new Date(d);
+    x.setDate(x.getDate() + days);
+    return x;
+  }
+
+  const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
+  const date = useMemo(() => toYmd(selectedDay), [selectedDay]);
 
   const hours = useMemo(() => hoursRange(8, 21), []);
 
@@ -22,10 +34,30 @@ export default function ScheduleScreen() {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }, [nowMs]);
 
+  const todayYmd = useMemo(() => toYmd(new Date(nowMs)), [nowMs]);
+  const selectedLabel = useMemo(() => {
+    return selectedDay.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  }, [selectedDay]);
+
   function slotStartMs(slot: string) {
     const [y, m, d] = date.split('-').map(Number);
     const [hh] = slot.split(':').map(Number);
     return new Date(y, m - 1, d, hh, 0, 0, 0).getTime();
+  }
+
+  function isPastSlot(slot: string) {
+    if (date < todayYmd) return true;
+    if (date > todayYmd) return false;
+    const start = slotStartMs(slot);
+    const end = start + 60 * 60 * 1000;
+    return nowMs >= end;
+  }
+
+  function isCurrentSlot(slot: string) {
+    if (date !== todayYmd) return false;
+    const start = slotStartMs(slot);
+    const end = start + 60 * 60 * 1000;
+    return nowMs >= start && nowMs < end;
   }
 
   useEffect(() => {
@@ -62,6 +94,7 @@ export default function ScheduleScreen() {
 
   useEffect(() => {
     if (!uid) return;
+    setRows([]);
     const ref = collection(db, 'schedule', date, 'slots');
     const unsub = onSnapshot(
       ref,
@@ -71,15 +104,13 @@ export default function ScheduleScreen() {
       }
     );
     return unsub;
-  }, [uid]);
+  }, [uid, date]);
 
   async function book(slot: string) {
     const u = auth.currentUser;
     if (!u) return;
 
-    const start = slotStartMs(slot);
-    const end = start + 60 * 60 * 1000;
-    if (nowMs >= end) {
+    if (isPastSlot(slot)) {
       Alert.alert('Cannot book', 'That time has already passed.');
       return;
     }
@@ -123,12 +154,20 @@ export default function ScheduleScreen() {
   return (
     <View style={styles.container}>
       <Card style={styles.header} mode="elevated">
-        <Card.Title title="Schedule" subtitle={`${date} • ${nowLabel}`} />
+        <Card.Title title="Schedule" subtitle={`${selectedLabel} • ${nowLabel}`} />
         <Card.Content>
+          <View style={styles.navRow}>
+            <IconButton icon="chevron-left" onPress={() => setSelectedDay((d) => addDays(d, -1))} />
+            <Button mode="outlined" onPress={() => setSelectedDay(startOfDay(new Date()))}>
+              Today
+            </Button>
+            <IconButton icon="chevron-right" onPress={() => setSelectedDay((d) => addDays(d, 1))} />
+            <View style={{ flex: 1 }} />
+            <Button mode="outlined" onPress={refreshOnce}>
+              Refresh
+            </Button>
+          </View>
           <Text style={styles.muted}>Tap a time to book it. Booked slots show the name.</Text>
-          <Button mode="outlined" onPress={refreshOnce} style={styles.refresh}>
-            Refresh
-          </Button>
         </Card.Content>
       </Card>
 
@@ -139,8 +178,8 @@ export default function ScheduleScreen() {
         renderItem={({ item }) => {
           const start = slotStartMs(item.slot);
           const end = start + 60 * 60 * 1000;
-          const isPast = nowMs >= end;
-          const isCurrent = nowMs >= start && nowMs < end;
+          const isPast = isPastSlot(item.slot);
+          const isCurrent = isCurrentSlot(item.slot);
           const progress = isCurrent ? (nowMs - start) / (60 * 60 * 1000) : isPast ? 1 : 0;
 
           const subtitle = item.bookedBy
@@ -182,6 +221,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { margin: 16, borderRadius: 16 },
   muted: { opacity: 0.7 },
+  navRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
   refresh: { marginTop: 10, alignSelf: 'flex-start' },
   list: { padding: 16, paddingTop: 0, gap: 10 },
   row: { borderRadius: 14 },
