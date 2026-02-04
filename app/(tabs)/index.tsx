@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, StyleSheet, View } from 'react-native';
-import { Button, Card, Text } from 'react-native-paper';
+import { Button, Card, ProgressBar, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { canBook } from '@/src/bookingRules';
 import { hourLabel, hourSlot, hoursRange, toYmd } from '@/src/time';
@@ -13,8 +13,25 @@ export default function ScheduleScreen() {
   const date = useMemo(() => toYmd(new Date()), []);
   const [rows, setRows] = useState<SlotRow[]>([]);
   const [busySlot, setBusySlot] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const hours = useMemo(() => hoursRange(8, 21), []);
+
+  const nowLabel = useMemo(() => {
+    const d = new Date(nowMs);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }, [nowMs]);
+
+  function slotStartMs(slot: string) {
+    const [y, m, d] = date.split('-').map(Number);
+    const [hh] = slot.split(':').map(Number);
+    return new Date(y, m - 1, d, hh, 0, 0, 0).getTime();
+  }
+
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   function setFromSnapshot(docs: Array<{ id: string; data: any }>) {
     const booked = new Map<string, any>();
@@ -60,6 +77,13 @@ export default function ScheduleScreen() {
     const u = auth.currentUser;
     if (!u) return;
 
+    const start = slotStartMs(slot);
+    const end = start + 60 * 60 * 1000;
+    if (nowMs >= end) {
+      Alert.alert('Cannot book', 'That time has already passed.');
+      return;
+    }
+
     const allowed = await canBook(u.uid, date);
     if (!allowed.ok) {
       Alert.alert('Cannot book', allowed.reason);
@@ -99,7 +123,7 @@ export default function ScheduleScreen() {
   return (
     <View style={styles.container}>
       <Card style={styles.header} mode="elevated">
-        <Card.Title title="Schedule" subtitle={date} />
+        <Card.Title title="Schedule" subtitle={`${date} • ${nowLabel}`} />
         <Card.Content>
           <Text style={styles.muted}>Tap a time to book it. Booked slots show the name.</Text>
           <Button mode="outlined" onPress={refreshOnce} style={styles.refresh}>
@@ -112,23 +136,43 @@ export default function ScheduleScreen() {
         contentContainerStyle={styles.list}
         data={rows}
         keyExtractor={(r) => r.slot}
-        renderItem={({ item }) => (
-          <Card style={styles.row} mode="outlined">
-            <Card.Title
-              title={item.label}
-              subtitle={item.bookedBy ? `Booked by ${item.bookedBy}` : 'Available'}
-            />
-            <Card.Actions>
-              <Button
-                mode={item.bookedBy ? 'outlined' : 'contained'}
-                disabled={!!item.bookedBy || busySlot === item.slot}
-                loading={busySlot === item.slot}
-                onPress={() => book(item.slot)}>
-                Book
-              </Button>
-            </Card.Actions>
-          </Card>
-        )}
+        renderItem={({ item }) => {
+          const start = slotStartMs(item.slot);
+          const end = start + 60 * 60 * 1000;
+          const isPast = nowMs >= end;
+          const isCurrent = nowMs >= start && nowMs < end;
+          const progress = isCurrent ? (nowMs - start) / (60 * 60 * 1000) : isPast ? 1 : 0;
+
+          const subtitle = item.bookedBy
+            ? `Booked by ${item.bookedBy}`
+            : isPast
+              ? 'Passed'
+              : isCurrent
+                ? 'In progress'
+                : 'Available';
+
+          const disabled = !!item.bookedBy || busySlot === item.slot || isPast;
+
+          return (
+            <Card style={[styles.row, isPast && styles.rowPast]} mode="outlined">
+              <Card.Title title={item.label} subtitle={subtitle} />
+              {isCurrent && (
+                <Card.Content>
+                  <ProgressBar progress={progress} style={styles.progress} />
+                </Card.Content>
+              )}
+              <Card.Actions>
+                <Button
+                  mode={item.bookedBy ? 'outlined' : 'contained'}
+                  disabled={disabled}
+                  loading={busySlot === item.slot}
+                  onPress={() => book(item.slot)}>
+                  Book
+                </Button>
+              </Card.Actions>
+            </Card>
+          );
+        }}
       />
     </View>
   );
@@ -141,4 +185,6 @@ const styles = StyleSheet.create({
   refresh: { marginTop: 10, alignSelf: 'flex-start' },
   list: { padding: 16, paddingTop: 0, gap: 10 },
   row: { borderRadius: 14 },
+  rowPast: { opacity: 0.45 },
+  progress: { marginTop: 6, borderRadius: 999 },
 });
