@@ -8,8 +8,13 @@ export function watchAuth(cb: (u: User | null) => void) {
 
 export async function isAllowedEmail(email: string) {
   const key = email.trim().toLowerCase();
-  const snap = await getDoc(doc(db, 'allowedEmails', key));
-  return snap.exists();
+  try {
+    const snap = await getDoc(doc(db, 'allowedEmails', key));
+    return snap.exists();
+  } catch {
+    // If rules don't allow reading allowlist pre-auth, we treat as not allowed.
+    return false;
+  }
 }
 
 export async function requestAccess(name: string, email: string) {

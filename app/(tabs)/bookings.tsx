@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
-import { collection, deleteDoc, doc, getDocs, query, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 
 export default function MyBookingsScreen() {
   const [busy, setBusy] = useState(false);
@@ -26,6 +26,11 @@ export default function MyBookingsScreen() {
 
   useEffect(() => {
     load();
+    const u = auth.currentUser;
+    if (!u) return;
+    const q = query(collection(db, 'bookings'), where('userId', '==', u.uid));
+    const unsub = onSnapshot(q, () => load());
+    return unsub;
   }, []);
 
   async function unbook() {
@@ -38,7 +43,7 @@ export default function MyBookingsScreen() {
       const bookingRef = doc(db, 'bookings', `${booking.date}_${booking.slot}_${u.uid}`);
       await deleteDoc(bookingRef);
       await deleteDoc(slotRef);
-      setBooking(null);
+      await load();
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Failed to unbook');
     } finally {

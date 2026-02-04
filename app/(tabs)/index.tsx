@@ -4,7 +4,7 @@ import { Button, Card, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { canBook } from '@/src/bookingRules';
 import { hourLabel, hourSlot, hoursRange, toYmd } from '@/src/time';
-import { collection, doc, getDocs, runTransaction } from 'firebase/firestore';
+import { collection, doc, onSnapshot, runTransaction } from 'firebase/firestore';
 
 type SlotRow = { slot: string; label: string; bookedBy?: string };
 
@@ -15,10 +15,9 @@ export default function ScheduleScreen() {
 
   const hours = useMemo(() => hoursRange(8, 21), []);
 
-  async function load() {
-    const slotsSnap = await getDocs(collection(db, 'schedule', date, 'slots'));
+  function setFromSnapshot(docs: Array<{ id: string; data: any }>) {
     const booked = new Map<string, any>();
-    slotsSnap.docs.forEach((d) => booked.set(d.id, d.data()));
+    docs.forEach((d) => booked.set(d.id, d.data));
 
     setRows(
       hours.map((h) => {
@@ -29,8 +28,23 @@ export default function ScheduleScreen() {
     );
   }
 
+  async function refreshOnce() {
+    const ref = collection(db, 'schedule', date, 'slots');
+    const snap = await (await import('firebase/firestore')).getDocs(ref);
+    setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
+  }
+
   useEffect(() => {
-    load();
+    const ref = collection(db, 'schedule', date, 'slots');
+    const unsub = onSnapshot(
+      ref,
+      (snap) => setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
+      () => {
+        // Fall back to manual refresh if listener is blocked by rules.
+        refreshOnce();
+      }
+    );
+    return unsub;
   }, []);
 
   async function book(slot: string) {
@@ -65,7 +79,7 @@ export default function ScheduleScreen() {
         tx.set(bookingRef, payload);
       });
 
-      await load();
+      await refreshOnce();
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Failed to book');
     } finally {
@@ -79,6 +93,9 @@ export default function ScheduleScreen() {
         <Card.Title title="Schedule" subtitle={date} />
         <Card.Content>
           <Text style={styles.muted}>Tap a time to book it. Booked slots show the name.</Text>
+          <Button mode="outlined" onPress={refreshOnce} style={styles.refresh}>
+            Refresh
+          </Button>
         </Card.Content>
       </Card>
 
@@ -112,6 +129,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { margin: 16, borderRadius: 16 },
   muted: { opacity: 0.7 },
+  refresh: { marginTop: 10, alignSelf: 'flex-start' },
   list: { padding: 16, paddingTop: 0, gap: 10 },
   row: { borderRadius: 14 },
 });
