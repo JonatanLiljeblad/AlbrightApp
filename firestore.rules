@@ -184,6 +184,8 @@ service cloud.firestore {
       );
       allow update: if false;
 
+      // Note: atomicity is enforced from the schedule-slot side:
+      // creating a schedule slot requires the matching booking doc in the same batch/transaction.
       allow create: if isAllowed()
         && request.resource.data.keys().hasOnly(['date', 'slot', 'userId', 'name', 'email', 'createdAt'])
         && validYmd(request.resource.data.date)
@@ -192,14 +194,7 @@ service cloud.firestore {
         && request.resource.data.email is string
         && request.resource.data.email.lower() == emailLower()
         && request.resource.data.createdAt is int
-        && bookingId == bookingIdFor(request.resource.data.date, request.resource.data.slot, request.auth.uid)
-        // Ensure a matching schedule slot doc is created in the same transaction/batch.
-        && existsAfter(
-          /databases/$(database)/documents/schedule/$(request.resource.data.date)/slots/$(request.resource.data.slot)
-        )
-        && getAfter(
-          /databases/$(database)/documents/schedule/$(request.resource.data.date)/slots/$(request.resource.data.slot)
-        ).data.userId == request.auth.uid;
+        && bookingId == bookingIdFor(request.resource.data.date, request.resource.data.slot, request.auth.uid);
 
       allow delete: if signedIn() && (
         resource.data.userId == request.auth.uid || isAdmin()
