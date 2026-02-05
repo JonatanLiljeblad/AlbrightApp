@@ -7,7 +7,7 @@ import {
   User,
 } from 'firebase/auth';
 import { Platform } from 'react-native';
-import { auth, db, ADMIN_EMAILS } from './firebase';
+import { auth, db, ADMIN_EMAILS, OWNER_EMAILS } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export function watchAuth(cb: (u: User | null) => void) {
@@ -66,7 +66,13 @@ export async function signOutUser() {
   return signOut(auth);
 }
 
+export function isOwner(email?: string | null) {
+  if (!email) return false;
+  return OWNER_EMAILS.includes(email.trim().toLowerCase());
+}
+
 export function isAdmin(email?: string | null) {
   if (!email) return false;
-  return ADMIN_EMAILS.includes(email.trim().toLowerCase());
+  const e = email.trim().toLowerCase();
+  return isOwner(e) || ADMIN_EMAILS.includes(e);
 }

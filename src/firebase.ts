@@ -29,3 +29,8 @@ export const ADMIN_EMAILS = (process.env.EXPO_PUBLIC_ADMIN_EMAILS ?? '')
   .split(',')
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
+
+export const OWNER_EMAILS = (process.env.EXPO_PUBLIC_OWNER_EMAILS ?? '')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);

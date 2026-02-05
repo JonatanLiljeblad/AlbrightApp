@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { Alert, StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
-import { isAdmin } from '@/src/auth';
+import { isAdmin, isOwner } from '@/src/auth';
 import { collection, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
+import { useRouter } from 'expo-router';
 
 export default function AdminScreen() {
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [requests, setRequests] = useState<any[]>([]);
 
@@ -59,10 +61,18 @@ export default function AdminScreen() {
     }
   }
 
+  const owner = isOwner(auth.currentUser?.email);
+
   return (
     <Card style={styles.card} mode="elevated">
       <Card.Title title="Admin" />
       <Card.Content>
+        {owner && (
+          <Button mode="outlined" disabled={busy} onPress={() => router.push('/permissions' as any)}>
+            Edit permissions
+          </Button>
+        )}
+
         {requests.length === 0 ? (
           <Text>No pending requests.</Text>
         ) : (

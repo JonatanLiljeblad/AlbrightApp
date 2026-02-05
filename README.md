@@ -20,6 +20,7 @@ npm i
 - Copy `.env.example` → `.env.local`
 - Fill in values from Firebase Console → **Project settings → Your apps → Web app**
 - Set `EXPO_PUBLIC_ADMIN_EMAILS` to your admin email(s), comma-separated
+- Set `EXPO_PUBLIC_OWNER_EMAILS` to your owner email(s), comma-separated (owners can edit permissions)
 
 4) Run
 ```bash
