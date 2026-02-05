@@ -46,11 +46,11 @@ service cloud.firestore {
       return date + '_' + slot + '_' + uid;
     }
 
-    function isBookingPayload(d, slotId) {
+    function isBookingPayload(d, ymd, slotId) {
       return d.keys().hasOnly(['date', 'slot', 'userId', 'name', 'email', 'createdAt'])
         && validYmd(d.date)
         && validSlot(d.slot)
-        && d.date == date
+        && d.date == ymd
         && d.slot == slotId
         && d.userId == request.auth.uid
         && d.name is string
@@ -166,7 +166,7 @@ service cloud.firestore {
 
       allow create: if isAllowed()
         && !exists(/databases/$(database)/documents/schedule/$(date)/slots/$(slot))
-        && isBookingPayload(request.resource.data, slot);
+        && isBookingPayload(request.resource.data, date, slot);
 
       allow delete: if signedIn() && (
         resource.data.userId == request.auth.uid || isAdmin()
