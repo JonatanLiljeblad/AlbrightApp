@@ -1,15 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
-import { isAdmin, isOwner } from '@/src/auth';
+import { isAdmin as isAdminEnv, isOwner as isOwnerEnv } from '@/src/auth';
 import { collection, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import { useRouter } from 'expo-router';
 
 export default function AdminScreen() {
   const router = useRouter();
+  const me = (auth.currentUser?.email ?? '').trim().toLowerCase();
+
   const [busy, setBusy] = useState(false);
   const [requests, setRequests] = useState<any[]>([]);
+  const [ownerDoc, setOwnerDoc] = useState(false);
+  const [adminDoc, setAdminDoc] = useState(false);
 
   async function load() {
     const q = query(collection(db, 'accessRequests'), where('status', '==', 'pending'));
@@ -24,11 +28,24 @@ export default function AdminScreen() {
     return unsub;
   }, []);
 
+  useEffect(() => {
+    if (!me) return;
+    const unsubOwner = onSnapshot(doc(db, 'owners', me), (s) => setOwnerDoc(s.exists()));
+    const unsubAdmin = onSnapshot(doc(db, 'admins', me), (s) => setAdminDoc(s.exists()));
+    return () => {
+      unsubOwner();
+      unsubAdmin();
+    };
+  }, [me]);
+
+  const owner = useMemo(() => ownerDoc || isOwnerEnv(me), [ownerDoc, me]);
+  const canAdmin = useMemo(() => owner || adminDoc || isAdminEnv(me), [owner, adminDoc, me]);
+
   async function decide(email: string, allowed: boolean) {
     try {
       setBusy(true);
       const adminEmail = auth.currentUser?.email ?? '';
-      if (!isAdmin(adminEmail)) throw new Error('Not an admin');
+      if (!canAdmin) throw new Error('Not an admin');
 
       const key = email.trim().toLowerCase();
       await setDoc(
@@ -61,7 +78,6 @@ export default function AdminScreen() {
     }
   }
 
-  const owner = isOwner(auth.currentUser?.email);
 
   return (
     <Card style={styles.card} mode="elevated">
