@@ -24,8 +24,10 @@ service cloud.firestore {
     }
 
     function isAllowed() {
-      return emailLower() != null
-        && exists(/databases/$(database)/documents/allowedEmails/$(emailLower()));
+      return isAdmin() || (
+        emailLower() != null
+        && exists(/databases/$(database)/documents/allowedEmails/$(emailLower()))
+      );
     }
 
     function validYmd(s) {

@@ -43,9 +43,10 @@ This repo includes a starter `firestore.rules` that enforces:
 - unbooking only by the owner of the slot (or admin)
 
 ### Important setup notes (to avoid lockout)
-Before publishing the rules, seed these docs in Firestore (Firebase Console is fine):
+Before publishing the rules, seed at least this doc in Firestore (Firebase Console is fine):
 - `owners/{yourEmailLower}` (so you have at least one owner)
-- `allowedEmails/{yourEmailLower}` (so you can use the app)
+
+Owners/admins are treated as allowed users automatically; you can still add `allowedEmails/{yourEmailLower}` for clarity/consistency.
 
 ### Privacy note
 `allowedEmails` is readable by document ID to support pre-auth signup gating, which means someone could *guess* emails and probe existence (no list/query). If that’s a concern, move allowlist checks behind a Callable Cloud Function.
