@@ -166,11 +166,7 @@ service cloud.firestore {
 
       allow create: if isAllowed()
         && !exists(/databases/$(database)/documents/schedule/$(date)/slots/$(slot))
-        && isBookingPayload(request.resource.data, slot)
-        // Ensure a matching bookings doc is created in the same transaction/batch.
-        && existsAfter(
-          /databases/$(database)/documents/bookings/$(bookingIdFor(date, slot, request.auth.uid))
-        );
+        && isBookingPayload(request.resource.data, slot);
 
       allow delete: if signedIn() && (
         resource.data.userId == request.auth.uid || isAdmin()

@@ -39,7 +39,7 @@ npm run android
 This repo includes a starter `firestore.rules` that enforces:
 - allowlist gating (`allowedEmails/{emailLower}`)
 - role management (`owners/{emailLower}`, `admins/{emailLower}`)
-- booking integrity (only allowed users can create bookings; schedule slot + booking must be created together)
+- booking integrity (only allowed users can create bookings; slot exclusivity enforced by the app transaction)
 - unbooking only by the owner of the slot (or admin)
 
 ### Important setup notes (to avoid lockout)
