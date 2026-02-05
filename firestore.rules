@@ -1,0 +1,212 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function emailLower() {
+      return signedIn() && request.auth.token.email != null
+        ? request.auth.token.email.lower()
+        : null;
+    }
+
+    function isOwner() {
+      return emailLower() != null
+        && exists(/databases/$(database)/documents/owners/$(emailLower()));
+    }
+
+    function isAdmin() {
+      return isOwner() || (
+        emailLower() != null
+        && exists(/databases/$(database)/documents/admins/$(emailLower()))
+      );
+    }
+
+    function isAllowed() {
+      return emailLower() != null
+        && exists(/databases/$(database)/documents/allowedEmails/$(emailLower()));
+    }
+
+    function validYmd(s) {
+      return s is string && s.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function validSlot(s) {
+      return s is string && s.matches('^[0-9]{2}:00$');
+    }
+
+    function validEmail(s) {
+      return s is string && s.matches('^.+@.+[.].+$');
+    }
+
+    function bookingIdFor(date, slot, uid) {
+      return date + '_' + slot + '_' + uid;
+    }
+
+    function isBookingPayload(d, slotId) {
+      return d.keys().hasOnly(['date', 'slot', 'userId', 'name', 'email', 'createdAt'])
+        && validYmd(d.date)
+        && validSlot(d.slot)
+        && d.date == date
+        && d.slot == slotId
+        && d.userId == request.auth.uid
+        && d.name is string
+        && d.name.size() >= 1
+        && d.name.size() <= 80
+        && d.email is string
+        && validEmail(d.email)
+        && d.email.lower() == emailLower()
+        && d.createdAt is int;
+    }
+
+    // Allowlist (document id = lowercased email)
+    match /allowedEmails/{emailId} {
+      // Needed for pre-auth signup gating.
+      // Note: this still allows enumeration by guessing emails.
+      allow get: if true;
+      allow list: if false;
+
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['email', 'createdAt', 'createdBy'])
+        && request.resource.data.email is string
+        && request.resource.data.email.lower() == emailId
+        && validEmail(request.resource.data.email)
+        && request.resource.data.createdAt is int
+        && request.resource.data.createdBy is string
+        && request.resource.data.createdBy.lower() == emailLower();
+
+      allow delete: if isAdmin();
+    }
+
+    // Access requests (document id = lowercased email)
+    match /accessRequests/{emailId} {
+      // Users can create/refresh their own request before auth.
+      allow create: if request.resource.data.keys().hasOnly(['name', 'email', 'status', 'createdAt'])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt is int
+        && request.resource.data.email is string
+        && request.resource.data.email.lower() == emailId
+        && validEmail(request.resource.data.email)
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 80;
+
+      // Allow resubmits/edits only while still pending.
+      allow update: if resource.data.status == 'pending'
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasOnly(['name', 'email', 'status', 'createdAt'])
+        && request.resource.data.email is string
+        && request.resource.data.email.lower() == emailId
+        && validEmail(request.resource.data.email)
+        && request.resource.data.createdAt is int
+        && request.resource.data.name is string;
+
+      // Admin decisions
+      allow update: if isAdmin()
+        && request.resource.data.email is string
+        && request.resource.data.email.lower() == emailId
+        && request.resource.data.status in ['pending', 'approved', 'denied']
+        && request.resource.data.createdAt is int
+        && request.resource.data.name is string
+        && (
+          // If moving out of pending, require decision metadata.
+          request.resource.data.status == 'pending'
+          || (
+            request.resource.data.decidedAt is int
+            && request.resource.data.decidedBy is string
+            && request.resource.data.decidedBy.lower() == emailLower()
+          )
+        );
+
+      allow get: if isAdmin() || (signedIn() && emailLower() != null && emailId == emailLower());
+      allow list: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Role docs (document id = lowercased email)
+    match /owners/{emailId} {
+      allow get: if isOwner() || (signedIn() && emailLower() != null && emailId == emailLower());
+      allow list: if isOwner();
+
+      allow create, update: if isOwner()
+        && request.resource.data.keys().hasOnly(['email', 'createdAt', 'createdBy'])
+        && request.resource.data.email is string
+        && request.resource.data.email.lower() == emailId
+        && validEmail(request.resource.data.email)
+        && request.resource.data.createdAt is int
+        && request.resource.data.createdBy is string
+        && request.resource.data.createdBy.lower() == emailLower();
+
+      allow delete: if isOwner();
+    }
+
+    match /admins/{emailId} {
+      allow get: if isOwner() || (signedIn() && emailLower() != null && emailId == emailLower());
+      allow list: if isOwner();
+
+      allow create, update: if isOwner()
+        && request.resource.data.keys().hasOnly(['email', 'createdAt', 'createdBy'])
+        && request.resource.data.email is string
+        && request.resource.data.email.lower() == emailId
+        && validEmail(request.resource.data.email)
+        && request.resource.data.createdAt is int
+        && request.resource.data.createdBy is string
+        && request.resource.data.createdBy.lower() == emailLower();
+
+      allow delete: if isOwner();
+    }
+
+    // Schedule slots
+    match /schedule/{date}/slots/{slot} {
+      allow read: if isAllowed();
+      allow update: if false;
+
+      allow create: if isAllowed()
+        && !exists(/databases/$(database)/documents/schedule/$(date)/slots/$(slot))
+        && isBookingPayload(request.resource.data, slot)
+        // Ensure a matching bookings doc is created in the same transaction/batch.
+        && existsAfter(
+          /databases/$(database)/documents/bookings/$(bookingIdFor(date, slot, request.auth.uid))
+        );
+
+      allow delete: if signedIn() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // Bookings
+    match /bookings/{bookingId} {
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow update: if false;
+
+      allow create: if isAllowed()
+        && request.resource.data.keys().hasOnly(['date', 'slot', 'userId', 'name', 'email', 'createdAt'])
+        && validYmd(request.resource.data.date)
+        && validSlot(request.resource.data.slot)
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.email is string
+        && request.resource.data.email.lower() == emailLower()
+        && request.resource.data.createdAt is int
+        && bookingId == bookingIdFor(request.resource.data.date, request.resource.data.slot, request.auth.uid)
+        // Ensure a matching schedule slot doc is created in the same transaction/batch.
+        && existsAfter(
+          /databases/$(database)/documents/schedule/$(request.resource.data.date)/slots/$(request.resource.data.slot)
+        )
+        && getAfter(
+          /databases/$(database)/documents/schedule/$(request.resource.data.date)/slots/$(request.resource.data.slot)
+        ).data.userId == request.auth.uid;
+
+      allow delete: if signedIn() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

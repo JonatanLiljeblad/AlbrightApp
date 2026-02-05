@@ -3,6 +3,7 @@ import { Alert, StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { isAdmin as isAdminEnv, isOwner as isOwnerEnv } from '@/src/auth';
+import type { AccessRequest } from '@/src/types';
 import { collection, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import { useRouter } from 'expo-router';
 
@@ -11,14 +12,14 @@ export default function AdminScreen() {
   const me = (auth.currentUser?.email ?? '').trim().toLowerCase();
 
   const [busy, setBusy] = useState(false);
-  const [requests, setRequests] = useState<any[]>([]);
+  const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [ownerDoc, setOwnerDoc] = useState(false);
   const [adminDoc, setAdminDoc] = useState(false);
 
   async function load() {
     const q = query(collection(db, 'accessRequests'), where('status', '==', 'pending'));
     const snap = await getDocs(q);
-    setRequests(snap.docs.map((d) => d.data()));
+    setRequests(snap.docs.map((d) => d.data() as AccessRequest));
   }
 
   useEffect(() => {

@@ -1,10 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Tabs } from 'expo-router';
 
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+import { isAdmin, watchAuth } from '@/src/auth';
 import { auth } from '@/src/firebase';
-import { isAdmin } from '@/src/auth';
 
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
@@ -15,7 +15,13 @@ function TabBarIcon(props: {
 }
 
 export default function TabLayout() {
-  const admin = useMemo(() => isAdmin(auth.currentUser?.email), [auth.currentUser?.email]);
+  const [email, setEmail] = useState<string | null>(auth.currentUser?.email ?? null);
+
+  useEffect(() => {
+    return watchAuth((u) => setEmail(u?.email ?? null));
+  }, []);
+
+  const admin = useMemo(() => isAdmin(email), [email]);
 
   return (
     <Tabs

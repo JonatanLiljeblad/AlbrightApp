@@ -19,3 +19,14 @@ export function hourSlot(h: number) {
 export function hoursRange(startHour: number, endHourExclusive: number) {
   return Array.from({ length: endHourExclusive - startHour }, (_, i) => startHour + i);
 }
+
+export function slotStartMs(ymd: string, slot: string) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const [hh] = slot.split(':').map(Number);
+  return new Date(y, m - 1, d, hh, 0, 0, 0).getTime();
+}
+
+export function slotEndMs(ymd: string, slot: string, durationHours = 1) {
+  const start = slotStartMs(ymd, slot);
+  return start + durationHours * 60 * 60 * 1000;
+}
