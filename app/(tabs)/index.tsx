@@ -158,12 +158,12 @@ export default function ScheduleScreen() {
         <Card.Content>
           <View style={styles.navRow}>
             <IconButton icon="chevron-left" onPress={() => setSelectedDay((d) => addDays(d, -1))} />
-            <Button mode="outlined" onPress={() => setSelectedDay(startOfDay(new Date()))}>
+            <Button mode="contained" onPress={() => setSelectedDay(startOfDay(new Date()))}>
               Today
             </Button>
             <IconButton icon="chevron-right" onPress={() => setSelectedDay((d) => addDays(d, 1))} />
             <View style={{ flex: 1 }} />
-            <Button mode="outlined" onPress={refreshOnce}>
+            <Button mode="contained" onPress={refreshOnce}>
               Refresh
             </Button>
           </View>
@@ -202,7 +202,7 @@ export default function ScheduleScreen() {
               )}
               <Card.Actions>
                 <Button
-                  mode={item.bookedBy ? 'outlined' : 'contained'}
+                  mode="contained"
                   disabled={disabled}
                   loading={busySlot === item.slot}
                   onPress={() => book(item.slot)}>

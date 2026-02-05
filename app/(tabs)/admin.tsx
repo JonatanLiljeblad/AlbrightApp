@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
-import { Button, Card, Dialog, Portal, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Dialog, Divider, Portal, Text, TextInput } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { isAdmin as isAdminEnv, isOwner as isOwnerEnv } from '@/src/auth';
 import type { AccessRequest } from '@/src/types';
@@ -185,7 +185,7 @@ export default function AdminScreen() {
   if (!canAdmin) {
     return (
       <Card style={styles.card} mode="elevated">
-        <Card.Title title="Admin" />
+        <Card.Title title="Admin" subtitle="No access" />
         <Card.Content>
           <Text>You don’t have access to this page.</Text>
         </Card.Content>
@@ -196,22 +196,23 @@ export default function AdminScreen() {
   return (
     <>
       <Card style={styles.card} mode="elevated">
-        <Card.Title title="Admin" />
+        <Card.Title title="Admin" subtitle={owner ? 'Owner' : 'Admin'} />
         <Card.Content>
           {owner && (
-            <Button mode="outlined" disabled={busy} onPress={() => setPermOpen(true)}>
+            <Button style={styles.topBtn} mode="contained" disabled={busy} onPress={() => setPermOpen(true)}>
               Manage permissions
             </Button>
           )}
 
+          <Text style={styles.section}>Access requests</Text>
           {requests.length === 0 ? (
             <Text>No pending requests.</Text>
           ) : (
             requests.map((r) => (
               <Card key={r.email} style={styles.req} mode="outlined">
                 <Card.Title title={r.name || r.email} subtitle={r.email} />
-                <Card.Actions>
-                  <Button disabled={busy} onPress={() => decide(r.email, false)}>
+                <Card.Actions style={styles.actions}>
+                  <Button disabled={busy} mode="contained-tonal" onPress={() => decide(r.email, false)}>
                     Deny
                   </Button>
                   <Button disabled={busy} mode="contained" onPress={() => decide(r.email, true)}>
@@ -227,79 +228,95 @@ export default function AdminScreen() {
       <Portal>
         <Dialog visible={permOpen} onDismiss={() => setPermOpen(false)}>
           <Dialog.Title>Permissions</Dialog.Title>
-          <Dialog.Content>
-            <Text style={styles.section}>Owners</Text>
-            {owners.length === 0 ? (
-              <Text style={styles.muted}>No owners found.</Text>
-            ) : (
-              owners.map((o) => (
-                <View key={o.email} style={styles.row}>
-                  <Text>{o.email}</Text>
-                  <Button disabled={busy} onPress={() => removeRole('owners', o.email)}>
-                    Remove
-                  </Button>
-                </View>
-              ))
-            )}
+          <Dialog.ScrollArea style={styles.scrollArea}>
+            <Dialog.Content>
+              <Text style={styles.muted}>Only owners can view or change permissions.</Text>
 
-            <View style={styles.addRow}>
-              <TextInput
-                label="Add owner email"
-                mode="outlined"
-                value={newOwner}
-                onChangeText={setNewOwner}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                style={styles.input}
-              />
-              <Button
-                mode="contained"
-                disabled={busy || newOwner.trim().length === 0}
-                onPress={async () => {
-                  await addRole('owners', newOwner);
-                  setNewOwner('');
-                }}>
-                Add
-              </Button>
-            </View>
+              <Text style={styles.section}>Owners</Text>
+              {owners.length === 0 ? (
+                <Text style={styles.muted}>No owners found.</Text>
+              ) : (
+                owners.map((o) => (
+                  <View key={o.email} style={styles.row}>
+                    <Text>{o.email}</Text>
+                    <Button
+                      mode="contained-tonal"
+                      textColor="#D7263D"
+                      disabled={busy}
+                      onPress={() => removeRole('owners', o.email)}>
+                      Remove
+                    </Button>
+                  </View>
+                ))
+              )}
 
-            <Text style={styles.section}>Admins</Text>
-            {admins.length === 0 ? (
-              <Text style={styles.muted}>No admins found.</Text>
-            ) : (
-              admins.map((a) => (
-                <View key={a.email} style={styles.row}>
-                  <Text>{a.email}</Text>
-                  <Button disabled={busy} onPress={() => removeRole('admins', a.email)}>
-                    Remove
-                  </Button>
-                </View>
-              ))
-            )}
+              <View style={styles.addRow}>
+                <TextInput
+                  label="Add owner email"
+                  mode="outlined"
+                  value={newOwner}
+                  onChangeText={setNewOwner}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  style={styles.input}
+                />
+                <Button
+                  mode="contained"
+                  disabled={busy || newOwner.trim().length === 0}
+                  onPress={async () => {
+                    await addRole('owners', newOwner);
+                    setNewOwner('');
+                  }}>
+                  Add
+                </Button>
+              </View>
 
-            <View style={styles.addRow}>
-              <TextInput
-                label="Add admin email"
-                mode="outlined"
-                value={newAdmin}
-                onChangeText={setNewAdmin}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                style={styles.input}
-              />
-              <Button
-                mode="contained"
-                disabled={busy || newAdmin.trim().length === 0}
-                onPress={async () => {
-                  await addRole('admins', newAdmin);
-                  setNewAdmin('');
-                }}>
-                Add
-              </Button>
-            </View>
-          </Dialog.Content>
+              <Divider style={styles.divider} />
+
+              <Text style={styles.section}>Admins</Text>
+              {admins.length === 0 ? (
+                <Text style={styles.muted}>No admins found.</Text>
+              ) : (
+                admins.map((a) => (
+                  <View key={a.email} style={styles.row}>
+                    <Text>{a.email}</Text>
+                    <Button
+                      mode="contained-tonal"
+                      textColor="#D7263D"
+                      disabled={busy}
+                      onPress={() => removeRole('admins', a.email)}>
+                      Remove
+                    </Button>
+                  </View>
+                ))
+              )}
+
+              <View style={styles.addRow}>
+                <TextInput
+                  label="Add admin email"
+                  mode="outlined"
+                  value={newAdmin}
+                  onChangeText={setNewAdmin}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  style={styles.input}
+                />
+                <Button
+                  mode="contained"
+                  disabled={busy || newAdmin.trim().length === 0}
+                  onPress={async () => {
+                    await addRole('admins', newAdmin);
+                    setNewAdmin('');
+                  }}>
+                  Add
+                </Button>
+              </View>
+            </Dialog.Content>
+          </Dialog.ScrollArea>
           <Dialog.Actions>
-            <Button onPress={() => setPermOpen(false)}>Close</Button>
+            <Button mode="contained" onPress={() => setPermOpen(false)}>
+              Close
+            </Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
@@ -309,10 +326,14 @@ export default function AdminScreen() {
 
 const styles = StyleSheet.create({
   card: { margin: 16, borderRadius: 16 },
+  topBtn: { marginBottom: 12 },
   req: { marginTop: 12 },
   muted: { opacity: 0.7, marginBottom: 10 },
+  divider: { marginVertical: 12 },
   section: { marginTop: 14, marginBottom: 6, fontWeight: '700' },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  actions: { justifyContent: 'flex-end', gap: 8 },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   addRow: { marginTop: 8 },
   input: { marginBottom: 10 },
+  scrollArea: { maxHeight: 520 },
 });
