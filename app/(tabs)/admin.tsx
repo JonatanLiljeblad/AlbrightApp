@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
-import { Button, Card, Dialog, Divider, Portal, Text, TextInput } from 'react-native-paper';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Button, Card, Dialog, Portal, Text, TextInput } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { isAdmin as isAdminEnv, isOwner as isOwnerEnv } from '@/src/auth';
 import type { AccessRequest } from '@/src/types';
@@ -195,13 +195,44 @@ export default function AdminScreen() {
 
   return (
     <>
-      <Card style={styles.card} mode="elevated">
+      <ScrollView contentContainerStyle={styles.page}>
+        <Card style={styles.card} mode="elevated">
         <Card.Title title="Admin" subtitle={owner ? 'Owner' : 'Admin'} />
         <Card.Content>
           {owner && (
             <Button style={styles.topBtn} mode="contained" disabled={busy} onPress={() => setPermOpen(true)}>
               Manage permissions
             </Button>
+          )}
+
+          {owner && (
+            <>
+              <Text style={styles.muted}>
+                {owners.length} owner{owners.length === 1 ? '' : 's'} • {admins.length} admin{admins.length === 1 ? '' : 's'}
+              </Text>
+
+              <Text style={styles.section}>Owners</Text>
+              {owners.length === 0 ? (
+                <Text style={styles.muted}>No owners found.</Text>
+              ) : (
+                owners.map((o) => (
+                  <Card key={o.email} style={styles.req} mode="outlined">
+                    <Card.Title title={o.email} subtitle="Owner" />
+                  </Card>
+                ))
+              )}
+
+              <Text style={styles.section}>Admins</Text>
+              {admins.length === 0 ? (
+                <Text style={styles.muted}>No admins found.</Text>
+              ) : (
+                admins.map((a) => (
+                  <Card key={a.email} style={styles.req} mode="outlined">
+                    <Card.Title title={a.email} subtitle="Admin" />
+                  </Card>
+                ))
+              )}
+            </>
           )}
 
           <Text style={styles.section}>Access requests</Text>
@@ -223,22 +254,23 @@ export default function AdminScreen() {
             ))
           )}
         </Card.Content>
-      </Card>
+        </Card>
+      </ScrollView>
 
       <Portal>
-        <Dialog visible={permOpen} onDismiss={() => setPermOpen(false)}>
+        <Dialog visible={permOpen} onDismiss={() => setPermOpen(false)} style={styles.dialog}>
           <Dialog.Title>Permissions</Dialog.Title>
           <Dialog.ScrollArea style={styles.scrollArea}>
-            <Dialog.Content>
-              <Text style={styles.muted}>Only owners can view or change permissions.</Text>
-
+            <Dialog.Content style={styles.dialogContent}>
               <Text style={styles.section}>Owners</Text>
               {owners.length === 0 ? (
                 <Text style={styles.muted}>No owners found.</Text>
               ) : (
                 owners.map((o) => (
                   <View key={o.email} style={styles.row}>
-                    <Text>{o.email}</Text>
+                    <Text style={styles.rowEmail} numberOfLines={1} ellipsizeMode="middle">
+                      {o.email}
+                    </Text>
                     <Button
                       mode="contained-tonal"
                       textColor="#D7263D"
@@ -261,6 +293,7 @@ export default function AdminScreen() {
                   style={styles.input}
                 />
                 <Button
+                  style={styles.addBtn}
                   mode="contained"
                   disabled={busy || newOwner.trim().length === 0}
                   onPress={async () => {
@@ -271,15 +304,15 @@ export default function AdminScreen() {
                 </Button>
               </View>
 
-              <Divider style={styles.divider} />
-
               <Text style={styles.section}>Admins</Text>
               {admins.length === 0 ? (
                 <Text style={styles.muted}>No admins found.</Text>
               ) : (
                 admins.map((a) => (
                   <View key={a.email} style={styles.row}>
-                    <Text>{a.email}</Text>
+                    <Text style={styles.rowEmail} numberOfLines={1} ellipsizeMode="middle">
+                      {a.email}
+                    </Text>
                     <Button
                       mode="contained-tonal"
                       textColor="#D7263D"
@@ -302,6 +335,7 @@ export default function AdminScreen() {
                   style={styles.input}
                 />
                 <Button
+                  style={styles.addBtn}
                   mode="contained"
                   disabled={busy || newAdmin.trim().length === 0}
                   onPress={async () => {
@@ -313,7 +347,7 @@ export default function AdminScreen() {
               </View>
             </Dialog.Content>
           </Dialog.ScrollArea>
-          <Dialog.Actions>
+          <Dialog.Actions style={styles.dialogActions}>
             <Button mode="contained" onPress={() => setPermOpen(false)}>
               Close
             </Button>
@@ -325,15 +359,22 @@ export default function AdminScreen() {
 }
 
 const styles = StyleSheet.create({
+  page: { paddingBottom: 16 },
   card: { margin: 16, borderRadius: 16 },
+
+  dialog: { alignSelf: 'center', width: '94%', maxWidth: 560 },
+  dialogContent: { paddingBottom: 16 },
+  dialogActions: { justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 8 },
+
   topBtn: { marginBottom: 12 },
   req: { marginTop: 12 },
   muted: { opacity: 0.7, marginBottom: 10 },
-  divider: { marginVertical: 12 },
-  section: { marginTop: 14, marginBottom: 6, fontWeight: '700' },
+  section: { marginTop: 18, marginBottom: 8, fontWeight: '700' },
   actions: { justifyContent: 'flex-end', gap: 8 },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  addRow: { marginTop: 8 },
-  input: { marginBottom: 10 },
-  scrollArea: { maxHeight: 520 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  rowEmail: { flex: 1, minWidth: 0, flexShrink: 1 },
+  addRow: { marginTop: 10, gap: 8 },
+  input: { width: '100%' },
+  addBtn: { alignSelf: 'flex-end' },
+  scrollArea: { maxHeight: 620, borderTopWidth: 0, borderBottomWidth: 0 },
 });
