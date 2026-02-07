@@ -197,8 +197,7 @@ export default function AdminScreen() {
     <>
       <ScrollView contentContainerStyle={styles.page}>
         <Card style={styles.card} mode="elevated">
-        <Card.Title title="Admin" subtitle={owner ? 'Owner' : 'Admin'} />
-        <Card.Content>
+          <Card.Content>
           {owner && (
             <Button style={styles.topBtn} mode="contained" disabled={busy} onPress={() => setPermOpen(true)}>
               Manage permissions
@@ -259,7 +258,7 @@ export default function AdminScreen() {
 
       <Portal>
         <Dialog visible={permOpen} onDismiss={() => setPermOpen(false)} style={styles.dialog}>
-          <Dialog.Title>Permissions</Dialog.Title>
+          <Dialog.Title style={styles.dialogTitle}>Permissions</Dialog.Title>
           <Dialog.ScrollArea style={styles.scrollArea}>
             <Dialog.Content style={styles.dialogContent}>
               <Text style={styles.section}>Owners</Text>
@@ -348,7 +347,11 @@ export default function AdminScreen() {
             </Dialog.Content>
           </Dialog.ScrollArea>
           <Dialog.Actions style={styles.dialogActions}>
-            <Button mode="contained" onPress={() => setPermOpen(false)}>
+            <Button
+              style={styles.closeBtn}
+              contentStyle={styles.closeBtnContent}
+              mode="contained"
+              onPress={() => setPermOpen(false)}>
               Close
             </Button>
           </Dialog.Actions>
@@ -363,8 +366,11 @@ const styles = StyleSheet.create({
   card: { margin: 16, borderRadius: 16 },
 
   dialog: { alignSelf: 'center', width: '94%', maxWidth: 560 },
+  dialogTitle: { width: '100%', textAlign: 'center', paddingHorizontal: 0 },
   dialogContent: { paddingBottom: 16 },
   dialogActions: { justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 8 },
+  closeBtn: { minWidth: 160 },
+  closeBtnContent: { paddingVertical: 6 },
 
   topBtn: { marginBottom: 12 },
   req: { marginTop: 12 },
