@@ -1,4 +1,5 @@
 import HistoryDialog from "@/components/HistoryDialog";
+import ReserveDialog from "@/components/ReserveDialog";
 import { isAdmin as isAdminEnv, isOwner as isOwnerEnv } from "@/src/auth";
 import { auth, db } from "@/src/firebase";
 import type { AccessRequest } from "@/src/types";
@@ -40,6 +41,7 @@ export default function AdminScreen() {
   const [permOpen, setPermOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
   const [reqOpen, setReqOpen] = useState(false);
+  const [resOpen, setResOpen] = useState(false);
   const [owners, setOwners] = useState<RoleDoc[]>([]);
   const [admins, setAdmins] = useState<RoleDoc[]>([]);
   const [newOwner, setNewOwner] = useState("");
@@ -267,6 +269,7 @@ export default function AdminScreen() {
                   mode="contained"
                   disabled={busy}
                   onPress={() => setPermOpen(true)}
+                  contentStyle={styles.btnContent}
                 >
                   Manage permissions
                 </Button>
@@ -275,6 +278,7 @@ export default function AdminScreen() {
                 mode="contained"
                 disabled={busy}
                 onPress={() => setHistOpen(true)}
+                contentStyle={styles.btnContent}
               >
                 View history
               </Button>
@@ -283,6 +287,7 @@ export default function AdminScreen() {
                   mode="contained"
                   disabled={busy}
                   onPress={() => setReqOpen(true)}
+                  contentStyle={styles.btnContent}
                 >
                   Access requests
                 </Button>
@@ -290,6 +295,14 @@ export default function AdminScreen() {
                   <Badge style={styles.badge}>{requests.length}</Badge>
                 )}
               </View>
+              <Button
+                mode="contained"
+                disabled={busy}
+                onPress={() => setResOpen(true)}
+                contentStyle={styles.btnContent}
+              >
+                Reserve time
+              </Button>
             </View>
           </Card.Content>
         </Card>
@@ -466,6 +479,7 @@ export default function AdminScreen() {
       </Portal>
 
       <HistoryDialog visible={histOpen} onDismiss={() => setHistOpen(false)} />
+      <ReserveDialog visible={resOpen} onDismiss={() => setResOpen(false)} />
     </>
   );
 }
@@ -486,6 +500,7 @@ const styles = StyleSheet.create({
   closeBtnContent: { paddingVertical: 6 },
 
   btnGroup: { marginTop: 18, gap: 15 },
+  btnContent: { paddingVertical: 8 },
   halfBtn: { flex: 1 },
   badge: { position: "absolute", top: -4, right: -4 },
   req: { marginTop: 12 },
