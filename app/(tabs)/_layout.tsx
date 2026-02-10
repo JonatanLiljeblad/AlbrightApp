@@ -4,7 +4,8 @@ import { Tabs } from 'expo-router';
 
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import { isAdmin, watchAuth } from '@/src/auth';
-import { auth } from '@/src/firebase';
+import { auth, db } from '@/src/firebase';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
@@ -23,6 +24,18 @@ export default function TabLayout() {
   }, []);
 
   const admin = useMemo(() => isAdmin(email), [email]);
+
+  const [pendingRequests, setPendingRequests] = useState(0);
+
+  useEffect(() => {
+    if (!admin) {
+      setPendingRequests(0);
+      return;
+    }
+    const q = query(collection(db, 'accessRequests'), where('status', '==', 'pending'));
+    const unsub = onSnapshot(q, (snap) => setPendingRequests(snap.size), () => setPendingRequests(0));
+    return unsub;
+  }, [admin]);
 
   return (
     <Tabs
@@ -61,6 +74,7 @@ export default function TabLayout() {
           href: admin ? undefined : null,
           title: 'Admin',
           tabBarIcon: ({ color }) => <TabBarIcon name="shield" color={color} />,
+          tabBarBadge: pendingRequests > 0 ? pendingRequests : undefined,
         }}
       />
       <Tabs.Screen
