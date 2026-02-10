@@ -1,12 +1,41 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Dimensions, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { Button, Card, Dialog, IconButton, Portal, Text, TextInput } from 'react-native-paper';
-import { auth, db } from '@/src/firebase';
-import { addDays, hourLabel, hourSlot, hoursRange, startOfDay, toYmd } from '@/src/time';
-import { collection, deleteDoc, doc, onSnapshot, query, runTransaction, where } from 'firebase/firestore';
+import { auth, db } from "@/src/firebase";
+import {
+  addDays,
+  hourLabel,
+  hourSlot,
+  hoursRange,
+  startOfDay,
+  toYmd,
+} from "@/src/time";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  query,
+  runTransaction,
+  where,
+} from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Dimensions,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import {
+  Button,
+  Card,
+  Dialog,
+  IconButton,
+  Portal,
+  Text,
+  TextInput,
+} from "react-native-paper";
 
 type SlotInfo = { slot: string; name: string; userId: string };
-type Mode = 'menu' | 'reserve' | 'manage';
+type Mode = "menu" | "reserve" | "manage";
 
 export default function ReserveDialog({
   visible,
@@ -15,8 +44,8 @@ export default function ReserveDialog({
   visible: boolean;
   onDismiss: () => void;
 }) {
-  const [mode, setMode] = useState<Mode>('menu');
-  const [title, setTitle] = useState('');
+  const [mode, setMode] = useState<Mode>("menu");
+  const [title, setTitle] = useState("");
   const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
   const [slotData, setSlotData] = useState<Map<string, SlotInfo>>(new Map());
   const [bookingSlots, setBookingSlots] = useState<Set<string>>(new Set());
@@ -29,8 +58,13 @@ export default function ReserveDialog({
   const hours = useMemo(() => hoursRange(8, 21), []);
 
   const dayLabel = useMemo(
-    () => selectedDay.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }),
-    [selectedDay]
+    () =>
+      selectedDay.toLocaleDateString([], {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      }),
+    [selectedDay],
   );
 
   const reservations = useMemo(() => {
@@ -46,8 +80,8 @@ export default function ReserveDialog({
   // Reset on open
   useEffect(() => {
     if (!visible) return;
-    setMode('menu');
-    setTitle('');
+    setMode("menu");
+    setTitle("");
     setSelected(new Set());
     setSelectedDay(startOfDay(new Date()));
   }, [visible]);
@@ -57,7 +91,7 @@ export default function ReserveDialog({
     if (!visible) return;
     setSelected(new Set());
 
-    const slotsRef = collection(db, 'schedule', date, 'slots');
+    const slotsRef = collection(db, "schedule", date, "slots");
     const unsubSlots = onSnapshot(
       slotsRef,
       (snap) => {
@@ -65,14 +99,20 @@ export default function ReserveDialog({
         snap.docs.forEach((d) => map.set(d.id, d.data() as SlotInfo));
         setSlotData(map);
       },
-      () => {}
+      () => {},
     );
 
-    const bookingsQ = query(collection(db, 'bookings'), where('date', '==', date));
+    const bookingsQ = query(
+      collection(db, "bookings"),
+      where("date", "==", date),
+    );
     const unsubBookings = onSnapshot(
       bookingsQ,
-      (snap) => setBookingSlots(new Set(snap.docs.map((d) => (d.data() as SlotInfo).slot))),
-      () => {}
+      (snap) =>
+        setBookingSlots(
+          new Set(snap.docs.map((d) => (d.data() as SlotInfo).slot)),
+        ),
+      () => {},
     );
 
     return () => {
@@ -101,15 +141,17 @@ export default function ReserveDialog({
       await runTransaction(db, async (tx) => {
         const reads = await Promise.all(
           slots.map(async (slot) => {
-            const slotRef = doc(db, 'schedule', date, 'slots', slot);
+            const slotRef = doc(db, "schedule", date, "slots", slot);
             const snap = await tx.get(slotRef);
             return { slot, exists: snap.exists(), slotRef };
-          })
+          }),
         );
 
         const taken = reads.filter((r) => r.exists);
         if (taken.length > 0) {
-          throw new Error(`Slot(s) ${taken.map((t) => t.slot).join(', ')} already taken.`);
+          throw new Error(
+            `Slot(s) ${taken.map((t) => t.slot).join(", ")} already taken.`,
+          );
         }
 
         for (const { slot, slotRef } of reads) {
@@ -118,16 +160,16 @@ export default function ReserveDialog({
             slot,
             userId: u.uid,
             name: title.trim(),
-            email: u.email || '',
+            email: u.email || "",
             createdAt: Date.now(),
           });
         }
       });
 
       setSelected(new Set());
-      setTitle('');
+      setTitle("");
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Failed to reserve');
+      Alert.alert("Error", e?.message ?? "Failed to reserve");
     } finally {
       setBusy(false);
     }
@@ -136,9 +178,9 @@ export default function ReserveDialog({
   async function unreserve(slot: string) {
     try {
       setBusy(true);
-      await deleteDoc(doc(db, 'schedule', date, 'slots', slot));
+      await deleteDoc(doc(db, "schedule", date, "slots", slot));
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Failed to unreserve');
+      Alert.alert("Error", e?.message ?? "Failed to unreserve");
     } finally {
       setBusy(false);
     }
@@ -156,10 +198,19 @@ export default function ReserveDialog({
             disabled={!canGoBack}
           />
           <Text style={s.dateLabel}>{dayLabel}</Text>
-          <IconButton icon="chevron-right" onPress={() => setSelectedDay((d) => addDays(d, 1))} size={22} />
+          <IconButton
+            icon="chevron-right"
+            onPress={() => setSelectedDay((d) => addDays(d, 1))}
+            size={22}
+          />
         </View>
         {canGoBack && (
-          <Button mode="text" compact onPress={() => setSelectedDay(startOfDay(new Date()))} style={s.todayBtn}>
+          <Button
+            mode="text"
+            compact
+            onPress={() => setSelectedDay(startOfDay(new Date()))}
+            style={s.todayBtn}
+          >
             Back to today
           </Button>
         )}
@@ -168,9 +219,9 @@ export default function ReserveDialog({
   }
 
   /* ---- title ---- */
-  let dlgTitle = 'Reserve Time';
-  if (mode === 'reserve') dlgTitle = 'New Reservation';
-  if (mode === 'manage') dlgTitle = 'Current Reservations';
+  let dlgTitle = "Reserve Time";
+  if (mode === "reserve") dlgTitle = "New Reservation";
+  if (mode === "manage") dlgTitle = "Current Reservations";
 
   return (
     <Portal>
@@ -178,12 +229,12 @@ export default function ReserveDialog({
         <Dialog.Title style={s.dlgTitle}>{dlgTitle}</Dialog.Title>
         <Dialog.ScrollArea style={s.scrollArea}>
           <Dialog.Content style={s.dlgContent}>
-            {mode === 'menu' ? (
+            {mode === "menu" ? (
               <View style={s.menu}>
                 <Button
                   mode="contained"
                   icon="clock-plus-outline"
-                  onPress={() => setMode('reserve')}
+                  onPress={() => setMode("reserve")}
                   contentStyle={s.menuBtnContent}
                 >
                   Reserve Time
@@ -192,13 +243,14 @@ export default function ReserveDialog({
                   mode="contained"
                   icon="clipboard-list-outline"
                   disabled={reservations.length === 0}
-                  onPress={() => setMode('manage')}
+                  onPress={() => setMode("manage")}
                   contentStyle={s.menuBtnContent}
                 >
-                  Current Reservations{reservations.length > 0 ? ` (${reservations.length})` : ''}
+                  Current Reservations
+                  {reservations.length > 0 ? ` (${reservations.length})` : ""}
                 </Button>
               </View>
-            ) : mode === 'reserve' ? (
+            ) : mode === "reserve" ? (
               <>
                 {renderDateNav()}
 
@@ -216,8 +268,10 @@ export default function ReserveDialog({
                 <View style={s.grid}>
                   {hours.map((h) => {
                     const slot = hourSlot(h);
-                    const isBooked = slotData.has(slot) && bookingSlots.has(slot);
-                    const isReserved = slotData.has(slot) && !bookingSlots.has(slot);
+                    const isBooked =
+                      slotData.has(slot) && bookingSlots.has(slot);
+                    const isReserved =
+                      slotData.has(slot) && !bookingSlots.has(slot);
                     const taken = isBooked || isReserved;
                     const sel = selected.has(slot);
                     return (
@@ -247,14 +301,17 @@ export default function ReserveDialog({
                   })}
                   {/* spacer chips to fill last row */}
                   {hours.length % 3 !== 0 &&
-                    Array.from({ length: 3 - (hours.length % 3) }).map((_, i) => (
-                      <View key={`spacer-${i}`} style={s.chipSpacer} />
-                    ))}
+                    Array.from({ length: 3 - (hours.length % 3) }).map(
+                      (_, i) => (
+                        <View key={`spacer-${i}`} style={s.chipSpacer} />
+                      ),
+                    )}
                 </View>
 
                 {selected.size > 0 && (
                   <Text style={s.summary}>
-                    {selected.size} slot{selected.size === 1 ? '' : 's'} selected
+                    {selected.size} slot{selected.size === 1 ? "" : "s"}{" "}
+                    selected
                   </Text>
                 )}
               </>
@@ -270,7 +327,7 @@ export default function ReserveDialog({
                     <Card key={r.slot} style={s.resCard} mode="outlined">
                       <Card.Title
                         title={r.name}
-                        subtitle={hourLabel(parseInt(r.slot.split(':')[0], 10))}
+                        subtitle={hourLabel(parseInt(r.slot.split(":")[0], 10))}
                       />
                       <Card.Actions>
                         <Button
@@ -290,22 +347,29 @@ export default function ReserveDialog({
           </Dialog.Content>
         </Dialog.ScrollArea>
         <Dialog.Actions style={s.dlgActions}>
-          {mode !== 'menu' && (
-            <Button mode="text" onPress={() => setMode('menu')}>
+          {mode !== "menu" && (
+            <Button mode="text" onPress={() => setMode("menu")}>
               Back
             </Button>
           )}
-          {mode === 'reserve' && (
+          {mode === "reserve" && (
             <Button
               mode="contained"
               onPress={reserve}
               loading={busy}
-              disabled={busy || selected.size === 0 || title.trim().length === 0}
+              disabled={
+                busy || selected.size === 0 || title.trim().length === 0
+              }
             >
               Reserve
             </Button>
           )}
-          <Button mode="contained" onPress={onDismiss}>
+          <Button
+            mode="contained"
+            onPress={onDismiss}
+            style={s.closeBtn}
+            contentStyle={s.closeBtnIn}
+          >
             Close
           </Button>
         </Dialog.Actions>
@@ -314,46 +378,68 @@ export default function ReserveDialog({
   );
 }
 
-const SCREEN_H = Dimensions.get('window').height;
+const SCREEN_H = Dimensions.get("window").height;
 
 const s = StyleSheet.create({
-  dialog: { alignSelf: 'center', width: '94%', maxWidth: 560 },
-  dlgTitle: { width: '100%', textAlign: 'center', paddingHorizontal: 0 },
+  dialog: { alignSelf: "center", width: "94%", maxWidth: 560 },
+  dlgTitle: { width: "100%", textAlign: "center", paddingHorizontal: 0 },
   dlgContent: { paddingBottom: 16 },
-  dlgActions: { justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 8, gap: 8 },
-  scrollArea: { maxHeight: SCREEN_H * 0.6, borderTopWidth: 0, borderBottomWidth: 0 },
+  dlgActions: {
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    paddingBottom: 8,
+    gap: 8,
+  },
+  scrollArea: {
+    maxHeight: SCREEN_H * 0.6,
+    borderTopWidth: 0,
+    borderBottomWidth: 0,
+  },
 
   menu: { gap: 12, marginTop: 8 },
   menuBtnContent: { paddingVertical: 10 },
 
-  dateNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, marginBottom: 4 },
-  dateLabel: { fontWeight: '700', fontSize: 16 },
-  todayBtn: { alignSelf: 'center', marginBottom: 4 },
+  closeBtn: { minWidth: 120 },
+  closeBtnIn: { paddingVertical: 6 },
+
+  dateNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    marginBottom: 4,
+  },
+  dateLabel: { fontWeight: "700", fontSize: 16 },
+  todayBtn: { alignSelf: "center", marginBottom: 4 },
 
   titleInput: { marginBottom: 14 },
   hint: { opacity: 0.6, marginBottom: 10, fontSize: 13 },
-  emptyText: { opacity: 0.6, textAlign: 'center', marginTop: 16 },
+  emptyText: { opacity: 0.6, textAlign: "center", marginTop: 16 },
 
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   chip: {
-    flexBasis: '31%',
+    flexBasis: "31%",
     flexGrow: 1,
-    alignItems: 'center' as const,
+    alignItems: "center" as const,
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#2A2A2A',
-    backgroundColor: '#141414',
+    borderColor: "#2A2A2A",
+    backgroundColor: "#141414",
   },
-  chipSpacer: { flexBasis: '31%', flexGrow: 1 },
-  chipBooked: { opacity: 0.3, backgroundColor: '#0B0B0B' },
-  chipReserved: { opacity: 0.5, backgroundColor: '#3A0B12', borderColor: '#D7263D' },
-  chipSelected: { backgroundColor: '#D7263D', borderColor: '#D7263D' },
-  chipText: { color: '#FFFFFF', fontSize: 13 },
-  chipTextBooked: { textDecorationLine: 'line-through' },
-  chipTextReserved: { color: '#D7263D' },
-  chipTextSelected: { color: '#FFFFFF', fontWeight: '700' },
+  chipSpacer: { flexBasis: "31%", flexGrow: 1 },
+  chipBooked: { opacity: 0.3, backgroundColor: "#0B0B0B" },
+  chipReserved: {
+    opacity: 0.5,
+    backgroundColor: "#3A0B12",
+    borderColor: "#D7263D",
+  },
+  chipSelected: { backgroundColor: "#D7263D", borderColor: "#D7263D" },
+  chipText: { color: "#FFFFFF", fontSize: 13 },
+  chipTextBooked: { textDecorationLine: "line-through" },
+  chipTextReserved: { color: "#D7263D" },
+  chipTextSelected: { color: "#FFFFFF", fontWeight: "700" },
 
-  summary: { marginTop: 14, fontWeight: '700' },
+  summary: { marginTop: 14, fontWeight: "700" },
   resCard: { marginTop: 8, borderRadius: 12 },
 });
