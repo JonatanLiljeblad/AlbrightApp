@@ -6,6 +6,7 @@ import { addDays, hourLabel, hourSlot, hoursRange, startOfDay, toYmd } from '@/s
 import { collection, deleteDoc, doc, onSnapshot, query, runTransaction, where } from 'firebase/firestore';
 
 type SlotInfo = { slot: string; name: string; userId: string };
+type Mode = 'menu' | 'reserve' | 'manage';
 
 export default function ReserveDialog({
   visible,
@@ -14,6 +15,7 @@ export default function ReserveDialog({
   visible: boolean;
   onDismiss: () => void;
 }) {
+  const [mode, setMode] = useState<Mode>('menu');
   const [title, setTitle] = useState('');
   const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
   const [slotData, setSlotData] = useState<Map<string, SlotInfo>>(new Map());
@@ -31,7 +33,6 @@ export default function ReserveDialog({
     [selectedDay]
   );
 
-  // Reservations = slots in schedule that have no matching booking doc
   const reservations = useMemo(() => {
     const res: { slot: string; name: string }[] = [];
     slotData.forEach((data, slot) => {
@@ -45,12 +46,13 @@ export default function ReserveDialog({
   // Reset on open
   useEffect(() => {
     if (!visible) return;
+    setMode('menu');
     setTitle('');
     setSelected(new Set());
     setSelectedDay(startOfDay(new Date()));
   }, [visible]);
 
-  // Live data for selected date: schedule slots + bookings
+  // Live data for selected date
   useEffect(() => {
     if (!visible) return;
     setSelected(new Set());
@@ -60,10 +62,7 @@ export default function ReserveDialog({
       slotsRef,
       (snap) => {
         const map = new Map<string, SlotInfo>();
-        snap.docs.forEach((d) => {
-          const data = d.data() as SlotInfo;
-          map.set(d.id, data);
-        });
+        snap.docs.forEach((d) => map.set(d.id, d.data() as SlotInfo));
         setSlotData(map);
       },
       () => {}
@@ -91,7 +90,6 @@ export default function ReserveDialog({
     });
   }
 
-  // Reserve: write ONLY to schedule (no booking doc → won't appear in My Bookings)
   async function reserve() {
     const u = auth.currentUser;
     if (!u || selected.size === 0 || title.trim().length === 0) return;
@@ -135,7 +133,6 @@ export default function ReserveDialog({
     }
   }
 
-  // Unreserve: delete schedule slot doc
   async function unreserve(slot: string) {
     try {
       setBusy(true);
@@ -147,117 +144,169 @@ export default function ReserveDialog({
     }
   }
 
+  /* ---- shared date nav ---- */
+  function renderDateNav() {
+    return (
+      <>
+        <View style={s.dateNav}>
+          <IconButton
+            icon="chevron-left"
+            onPress={() => setSelectedDay((d) => addDays(d, -1))}
+            size={22}
+            disabled={!canGoBack}
+          />
+          <Text style={s.dateLabel}>{dayLabel}</Text>
+          <IconButton icon="chevron-right" onPress={() => setSelectedDay((d) => addDays(d, 1))} size={22} />
+        </View>
+        {canGoBack && (
+          <Button mode="text" compact onPress={() => setSelectedDay(startOfDay(new Date()))} style={s.todayBtn}>
+            Back to today
+          </Button>
+        )}
+      </>
+    );
+  }
+
+  /* ---- title ---- */
+  let dlgTitle = 'Reserve Time';
+  if (mode === 'reserve') dlgTitle = 'New Reservation';
+  if (mode === 'manage') dlgTitle = 'Current Reservations';
+
   return (
     <Portal>
       <Dialog visible={visible} onDismiss={onDismiss} style={s.dialog}>
-        <Dialog.Title style={s.dlgTitle}>Reserve Time</Dialog.Title>
+        <Dialog.Title style={s.dlgTitle}>{dlgTitle}</Dialog.Title>
         <Dialog.ScrollArea style={s.scrollArea}>
           <Dialog.Content style={s.dlgContent}>
-            <View style={s.dateNav}>
-              <IconButton
-                icon="chevron-left"
-                onPress={() => setSelectedDay((d) => addDays(d, -1))}
-                size={22}
-                disabled={!canGoBack}
-              />
-              <Text style={s.dateLabel}>{dayLabel}</Text>
-              <IconButton icon="chevron-right" onPress={() => setSelectedDay((d) => addDays(d, 1))} size={22} />
-            </View>
-
-            {!canGoBack ? null : (
-              <Button mode="text" compact onPress={() => setSelectedDay(startOfDay(new Date()))} style={s.todayBtn}>
-                Back to today
-              </Button>
-            )}
-
-            {/* Current reservations for this date */}
-            {reservations.length > 0 && (
+            {mode === 'menu' ? (
+              <View style={s.menu}>
+                <Button
+                  mode="contained"
+                  icon="clock-plus-outline"
+                  onPress={() => setMode('reserve')}
+                  contentStyle={s.menuBtnContent}
+                >
+                  Reserve Time
+                </Button>
+                <Button
+                  mode="contained"
+                  icon="clipboard-list-outline"
+                  disabled={reservations.length === 0}
+                  onPress={() => setMode('manage')}
+                  contentStyle={s.menuBtnContent}
+                >
+                  Current Reservations{reservations.length > 0 ? ` (${reservations.length})` : ''}
+                </Button>
+              </View>
+            ) : mode === 'reserve' ? (
               <>
-                <Text style={s.sectionTitle}>Reservations</Text>
-                {reservations.map((r) => (
-                  <Card key={r.slot} style={s.resCard} mode="outlined">
-                    <Card.Title
-                      title={r.name}
-                      subtitle={hourLabel(parseInt(r.slot.split(':')[0], 10))}
-                    />
-                    <Card.Actions>
-                      <Button
-                        mode="contained-tonal"
-                        textColor="#D7263D"
-                        disabled={busy}
-                        onPress={() => unreserve(r.slot)}
-                        contentStyle={s.actionContent}
+                {renderDateNav()}
+
+                <TextInput
+                  label="Title"
+                  mode="outlined"
+                  value={title}
+                  onChangeText={setTitle}
+                  placeholder="e.g. Maintenance, Event…"
+                  style={s.titleInput}
+                />
+
+                <Text style={s.hint}>Tap to select slots:</Text>
+
+                <View style={s.grid}>
+                  {hours.map((h) => {
+                    const slot = hourSlot(h);
+                    const isBooked = slotData.has(slot) && bookingSlots.has(slot);
+                    const isReserved = slotData.has(slot) && !bookingSlots.has(slot);
+                    const taken = isBooked || isReserved;
+                    const sel = selected.has(slot);
+                    return (
+                      <TouchableOpacity
+                        key={slot}
+                        style={[
+                          s.chip,
+                          isBooked && s.chipBooked,
+                          isReserved && s.chipReserved,
+                          sel && s.chipSelected,
+                        ]}
+                        disabled={taken}
+                        onPress={() => toggleSlot(slot)}
                       >
-                        Unreserve
-                      </Button>
-                    </Card.Actions>
-                  </Card>
-                ))}
+                        <Text
+                          style={[
+                            s.chipText,
+                            isBooked && s.chipTextBooked,
+                            isReserved && s.chipTextReserved,
+                            sel && s.chipTextSelected,
+                          ]}
+                        >
+                          {hourLabel(h)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  {/* spacer chips to fill last row */}
+                  {hours.length % 3 !== 0 &&
+                    Array.from({ length: 3 - (hours.length % 3) }).map((_, i) => (
+                      <View key={`spacer-${i}`} style={s.chipSpacer} />
+                    ))}
+                </View>
+
+                {selected.size > 0 && (
+                  <Text style={s.summary}>
+                    {selected.size} slot{selected.size === 1 ? '' : 's'} selected
+                  </Text>
+                )}
               </>
-            )}
+            ) : (
+              /* manage mode */
+              <>
+                {renderDateNav()}
 
-            {/* New reservation */}
-            <Text style={s.sectionTitle}>New Reservation</Text>
-
-            <TextInput
-              label="Title"
-              mode="outlined"
-              value={title}
-              onChangeText={setTitle}
-              placeholder="e.g. Maintenance, Event…"
-              style={s.titleInput}
-            />
-
-            <Text style={s.hint}>Tap to select slots:</Text>
-
-            <View style={s.grid}>
-              {hours.map((h) => {
-                const slot = hourSlot(h);
-                const isBooked = slotData.has(slot) && bookingSlots.has(slot);
-                const isReserved = slotData.has(slot) && !bookingSlots.has(slot);
-                const taken = isBooked || isReserved;
-                const sel = selected.has(slot);
-                return (
-                  <TouchableOpacity
-                    key={slot}
-                    style={[s.chip, isBooked && s.chipBooked, isReserved && s.chipReserved, sel && s.chipSelected]}
-                    disabled={taken}
-                    onPress={() => toggleSlot(slot)}
-                  >
-                    <Text
-                      style={[
-                        s.chipText,
-                        isBooked && s.chipTextBooked,
-                        isReserved && s.chipTextReserved,
-                        sel && s.chipTextSelected,
-                      ]}
-                    >
-                      {hourLabel(h)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {selected.size > 0 && (
-              <Text style={s.summary}>
-                {selected.size} slot{selected.size === 1 ? '' : 's'} selected
-              </Text>
+                {reservations.length === 0 ? (
+                  <Text style={s.emptyText}>No reservations on this day.</Text>
+                ) : (
+                  reservations.map((r) => (
+                    <Card key={r.slot} style={s.resCard} mode="outlined">
+                      <Card.Title
+                        title={r.name}
+                        subtitle={hourLabel(parseInt(r.slot.split(':')[0], 10))}
+                      />
+                      <Card.Actions>
+                        <Button
+                          mode="contained-tonal"
+                          textColor="#D7263D"
+                          disabled={busy}
+                          onPress={() => unreserve(r.slot)}
+                        >
+                          Unreserve
+                        </Button>
+                      </Card.Actions>
+                    </Card>
+                  ))
+                )}
+              </>
             )}
           </Dialog.Content>
         </Dialog.ScrollArea>
         <Dialog.Actions style={s.dlgActions}>
-          <Button mode="text" onPress={onDismiss} contentStyle={s.actionContent}>
+          {mode !== 'menu' && (
+            <Button mode="text" onPress={() => setMode('menu')}>
+              Back
+            </Button>
+          )}
+          {mode === 'reserve' && (
+            <Button
+              mode="contained"
+              onPress={reserve}
+              loading={busy}
+              disabled={busy || selected.size === 0 || title.trim().length === 0}
+            >
+              Reserve
+            </Button>
+          )}
+          <Button mode="contained" onPress={onDismiss}>
             Close
-          </Button>
-          <Button
-            mode="contained"
-            onPress={reserve}
-            loading={busy}
-            disabled={busy || selected.size === 0 || title.trim().length === 0}
-            contentStyle={s.actionContent}
-          >
-            Reserve
           </Button>
         </Dialog.Actions>
       </Dialog>
@@ -265,40 +314,46 @@ export default function ReserveDialog({
   );
 }
 
+const SCREEN_H = Dimensions.get('window').height;
+
 const s = StyleSheet.create({
   dialog: { alignSelf: 'center', width: '94%', maxWidth: 560 },
   dlgTitle: { width: '100%', textAlign: 'center', paddingHorizontal: 0 },
   dlgContent: { paddingBottom: 16 },
   dlgActions: { justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 8, gap: 8 },
-  scrollArea: { maxHeight: Dimensions.get('window').height * 0.65, borderTopWidth: 0, borderBottomWidth: 0 },
-  actionContent: { paddingVertical: 6 },
+  scrollArea: { maxHeight: SCREEN_H * 0.6, borderTopWidth: 0, borderBottomWidth: 0 },
+
+  menu: { gap: 12, marginTop: 8 },
+  menuBtnContent: { paddingVertical: 10 },
 
   dateNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, marginBottom: 4 },
   dateLabel: { fontWeight: '700', fontSize: 16 },
   todayBtn: { alignSelf: 'center', marginBottom: 4 },
 
-  sectionTitle: { fontWeight: '700', marginTop: 14, marginBottom: 8 },
-  resCard: { marginBottom: 8, borderRadius: 12 },
-
   titleInput: { marginBottom: 14 },
   hint: { opacity: 0.6, marginBottom: 10, fontSize: 13 },
+  emptyText: { opacity: 0.6, textAlign: 'center', marginTop: 16 },
 
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 12,
+    flexBasis: '31%',
+    flexGrow: 1,
+    alignItems: 'center' as const,
+    paddingVertical: 12,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#2A2A2A',
     backgroundColor: '#141414',
   },
+  chipSpacer: { flexBasis: '31%', flexGrow: 1 },
   chipBooked: { opacity: 0.3, backgroundColor: '#0B0B0B' },
   chipReserved: { opacity: 0.5, backgroundColor: '#3A0B12', borderColor: '#D7263D' },
   chipSelected: { backgroundColor: '#D7263D', borderColor: '#D7263D' },
-  chipText: { color: '#FFFFFF', fontSize: 15 },
+  chipText: { color: '#FFFFFF', fontSize: 13 },
   chipTextBooked: { textDecorationLine: 'line-through' },
   chipTextReserved: { color: '#D7263D' },
   chipTextSelected: { color: '#FFFFFF', fontWeight: '700' },
 
   summary: { marginTop: 14, fontWeight: '700' },
+  resCard: { marginTop: 8, borderRadius: 12 },
 });
