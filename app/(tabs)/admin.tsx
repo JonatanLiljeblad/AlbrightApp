@@ -5,6 +5,7 @@ import { auth, db } from '@/src/firebase';
 import { isAdmin as isAdminEnv, isOwner as isOwnerEnv } from '@/src/auth';
 import type { AccessRequest } from '@/src/types';
 import { collection, doc, getDocs, onSnapshot, query, setDoc, deleteDoc, where } from 'firebase/firestore';
+import HistoryDialog from '@/components/HistoryDialog';
 
 type RoleDoc = { email: string; createdAt: number; createdBy: string };
 
@@ -21,6 +22,7 @@ export default function AdminScreen() {
   const [adminDoc, setAdminDoc] = useState(false);
 
   const [permOpen, setPermOpen] = useState(false);
+  const [histOpen, setHistOpen] = useState(false);
   const [owners, setOwners] = useState<RoleDoc[]>([]);
   const [admins, setAdmins] = useState<RoleDoc[]>([]);
   const [newOwner, setNewOwner] = useState('');
@@ -198,11 +200,16 @@ export default function AdminScreen() {
       <ScrollView contentContainerStyle={styles.page}>
         <Card style={styles.card} mode="elevated">
           <Card.Content>
-          {owner && (
-            <Button style={styles.topBtn} mode="contained" disabled={busy} onPress={() => setPermOpen(true)}>
-              Manage permissions
+          <View style={styles.btnRow}>
+            {owner && (
+              <Button style={styles.halfBtn} mode="contained" disabled={busy} onPress={() => setPermOpen(true)}>
+                Manage permissions
+              </Button>
+            )}
+            <Button style={styles.halfBtn} mode="contained" disabled={busy} onPress={() => setHistOpen(true)}>
+              View history
             </Button>
-          )}
+          </View>
 
           {owner && (
             <>
@@ -357,6 +364,8 @@ export default function AdminScreen() {
           </Dialog.Actions>
         </Dialog>
       </Portal>
+
+      <HistoryDialog visible={histOpen} onDismiss={() => setHistOpen(false)} />
     </>
   );
 }
@@ -372,7 +381,8 @@ const styles = StyleSheet.create({
   closeBtn: { minWidth: 160 },
   closeBtnContent: { paddingVertical: 6 },
 
-  topBtn: { marginBottom: 12 },
+  btnRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  halfBtn: { flex: 1 },
   req: { marginTop: 12 },
   muted: { opacity: 0.7, marginBottom: 10 },
   section: { marginTop: 18, marginBottom: 8, fontWeight: '700' },
