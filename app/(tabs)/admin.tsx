@@ -239,7 +239,7 @@ export default function AdminScreen() {
           <Card.Content>
             {owner && (
               <>
-                <Text style={styles.section}>Owners</Text>
+                <Text style={styles.section}>Owners TEST</Text>
                 {owners.length === 0 ? (
                   <Text style={styles.muted}>No owners found.</Text>
                 ) : (
@@ -501,7 +501,6 @@ const styles = StyleSheet.create({
 
   btnGroup: { marginTop: 18, gap: 15 },
   btnContent: { paddingVertical: 8 },
-  halfBtn: { flex: 1 },
   badge: { position: "absolute", top: -4, right: -4 },
   req: { marginTop: 12 },
   muted: { opacity: 0.7, marginBottom: 10 },

@@ -204,7 +204,6 @@ const styles = StyleSheet.create({
   header: { margin: 16, borderRadius: 16 },
   muted: { opacity: 0.7 },
   navRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
-  refresh: { marginTop: 10, alignSelf: 'flex-start' },
   list: { padding: 16, paddingTop: 0, gap: 10 },
   row: { borderRadius: 14 },
   rowPast: { opacity: 0.45 },
