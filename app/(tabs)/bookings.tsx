@@ -5,26 +5,22 @@ import { auth, db } from '@/src/firebase';
 import { slotEndMs } from '@/src/time';
 import type { Booking } from '@/src/types';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, getDocs, onSnapshot, query, runTransaction, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, runTransaction, where } from 'firebase/firestore';
 
 export default function MyBookingsScreen() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
 
-  async function load() {
-    const u = auth.currentUser;
-    if (!u) return;
-    const q = query(collection(db, 'bookings'), where('userId', '==', u.uid));
-    const snap = await getDocs(q);
-
+  function activeBookings(docs: Array<{ data: Booking }>) {
     const now = Date.now();
-    const docs = snap.docs.map((d) => d.data() as Booking);
-    const active = docs.filter((b) => {
-      const endMs = slotEndMs(b.date, b.slot);
-      return Number.isFinite(endMs) && endMs > now;
-    });
+    const active = docs
+      .map((d) => d.data)
+      .filter((b) => {
+        const endMs = slotEndMs(b.date, b.slot);
+        return Number.isFinite(endMs) && endMs > now;
+      });
     active.sort((a, b) => `${a.date}_${a.slot}`.localeCompare(`${b.date}_${b.slot}`));
-    setBookings(active);
+    return active;
   }
 
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
@@ -33,11 +29,16 @@ export default function MyBookingsScreen() {
 
   useEffect(() => {
     if (!uid) return;
-    load();
     const q = query(collection(db, 'bookings'), where('userId', '==', uid));
-    const unsub = onSnapshot(q, () => load(), () => {
-      // Ignore permission errors during auth transitions.
-    });
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setBookings(activeBookings(snap.docs.map((d) => ({ data: d.data() as Booking }))));
+      },
+      () => {
+        // Ignore permission errors during auth transitions.
+      }
+    );
     return unsub;
   }, [uid]);
 
@@ -64,8 +65,6 @@ export default function MyBookingsScreen() {
         tx.delete(bookingRef);
         tx.delete(slotRef);
       });
-
-      await load();
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Failed to unbook');
     } finally {

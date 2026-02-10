@@ -3,7 +3,7 @@ import { Alert, FlatList, StyleSheet, View } from 'react-native';
 import { Button, Card, IconButton, ProgressBar, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { canBook } from '@/src/bookingRules';
-import { hourLabel, hourSlot, hoursRange, toYmd } from '@/src/time';
+import { addDays, hourLabel, hourSlot, hoursRange, slotStartMs as slotStartMsUtil, startOfDay, toYmd } from '@/src/time';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, doc, getDocs, onSnapshot, runTransaction } from 'firebase/firestore';
 
@@ -13,16 +13,6 @@ export default function ScheduleScreen() {
   const [rows, setRows] = useState<SlotRow[]>([]);
   const [busySlot, setBusySlot] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
-
-  function startOfDay(d: Date) {
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  }
-
-  function addDays(d: Date, days: number) {
-    const x = new Date(d);
-    x.setDate(x.getDate() + days);
-    return x;
-  }
 
   const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
   const date = useMemo(() => toYmd(selectedDay), [selectedDay]);
@@ -39,23 +29,17 @@ export default function ScheduleScreen() {
     return selectedDay.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   }, [selectedDay]);
 
-  function slotStartMs(slot: string) {
-    const [y, m, d] = date.split('-').map(Number);
-    const [hh] = slot.split(':').map(Number);
-    return new Date(y, m - 1, d, hh, 0, 0, 0).getTime();
-  }
-
   function isPastSlot(slot: string) {
     if (date < todayYmd) return true;
     if (date > todayYmd) return false;
-    const start = slotStartMs(slot);
+    const start = slotStartMsUtil(date, slot);
     const end = start + 60 * 60 * 1000;
     return nowMs >= end;
   }
 
   function isCurrentSlot(slot: string) {
     if (date !== todayYmd) return false;
-    const start = slotStartMs(slot);
+    const start = slotStartMsUtil(date, slot);
     const end = start + 60 * 60 * 1000;
     return nowMs >= start && nowMs < end;
   }
@@ -143,7 +127,6 @@ export default function ScheduleScreen() {
         tx.set(bookingRef, payload);
       });
 
-      await refreshOnce();
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Failed to book');
     } finally {
@@ -176,8 +159,7 @@ export default function ScheduleScreen() {
         data={rows}
         keyExtractor={(r) => r.slot}
         renderItem={({ item }) => {
-          const start = slotStartMs(item.slot);
-          const end = start + 60 * 60 * 1000;
+          const start = slotStartMsUtil(date, item.slot);
           const isPast = isPastSlot(item.slot);
           const isCurrent = isCurrentSlot(item.slot);
           const progress = isCurrent ? (nowMs - start) / (60 * 60 * 1000) : isPast ? 1 : 0;

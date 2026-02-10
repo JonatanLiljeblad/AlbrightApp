@@ -16,6 +16,7 @@ function TabBarIcon(props: {
 
 export default function TabLayout() {
   const [email, setEmail] = useState<string | null>(auth.currentUser?.email ?? null);
+  const headerShown = useClientOnlyValue(false, true);
 
   useEffect(() => {
     return watchAuth((u) => setEmail(u?.email ?? null));
@@ -31,7 +32,7 @@ export default function TabLayout() {
         tabBarStyle: { backgroundColor: '#0B0B0B', borderTopColor: '#141414' },
         headerStyle: { backgroundColor: '#0B0B0B' },
         headerTintColor: '#FFFFFF',
-        headerShown: useClientOnlyValue(false, true),
+        headerShown,
       }}>
       <Tabs.Screen
         name="index"

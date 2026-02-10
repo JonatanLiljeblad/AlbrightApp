@@ -1,14 +1,19 @@
+import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { auth } from '@/src/firebase';
-import { signOutUser } from '@/src/auth';
+import { signOutUser, watchAuth } from '@/src/auth';
 
 export default function Settings() {
+  const [email, setEmail] = useState<string | null>(auth.currentUser?.email ?? null);
+
+  useEffect(() => watchAuth((u) => setEmail(u?.email ?? null)), []);
+
   return (
     <Card style={styles.card} mode="elevated">
       <Card.Title title="Settings" />
       <Card.Content>
-        <Text style={styles.muted}>Signed in as {auth.currentUser?.email}</Text>
+        <Text style={styles.muted}>Signed in as {email}</Text>
         <Button mode="contained" onPress={signOutUser} style={styles.btn}>
           Sign out
         </Button>

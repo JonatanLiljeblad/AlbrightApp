@@ -30,3 +30,13 @@ export function slotEndMs(ymd: string, slot: string, durationHours = 1) {
   const start = slotStartMs(ymd, slot);
   return start + durationHours * 60 * 60 * 1000;
 }
+
+export function startOfDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+export function addDays(d: Date, days: number) {
+  const x = new Date(d);
+  x.setDate(x.getDate() + days);
+  return x;
+}
