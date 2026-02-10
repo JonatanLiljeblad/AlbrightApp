@@ -6,7 +6,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDocs,
   onSnapshot,
   query,
   setDoc,
@@ -46,27 +45,6 @@ export default function AdminScreen() {
   const [newOwner, setNewOwner] = useState("");
   const [newAdmin, setNewAdmin] = useState("");
 
-  async function load() {
-    const q = query(
-      collection(db, "accessRequests"),
-      where("status", "==", "pending"),
-    );
-    const snap = await getDocs(q);
-    setRequests(snap.docs.map((d) => d.data() as AccessRequest));
-  }
-
-  useEffect(() => {
-    load();
-    const q = query(
-      collection(db, "accessRequests"),
-      where("status", "==", "pending"),
-    );
-    const unsub = onSnapshot(q, (snap) =>
-      setRequests(snap.docs.map((d) => d.data() as AccessRequest)),
-    );
-    return unsub;
-  }, []);
-
   useEffect(() => {
     if (!me) return;
     const unsubOwner = onSnapshot(doc(db, "owners", me), (s) =>
@@ -86,6 +64,23 @@ export default function AdminScreen() {
     () => owner || adminDoc || isAdminEnv(me),
     [owner, adminDoc, me],
   );
+
+  useEffect(() => {
+    if (!canAdmin) {
+      setRequests([]);
+      return;
+    }
+    const q = query(
+      collection(db, "accessRequests"),
+      where("status", "==", "pending"),
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => setRequests(snap.docs.map((d) => d.data() as AccessRequest)),
+      () => {},
+    );
+    return unsub;
+  }, [canAdmin]);
 
   useEffect(() => {
     if (!owner) {
@@ -217,8 +212,6 @@ export default function AdminScreen() {
           { merge: true },
         );
       }
-
-      await load();
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed");
     } finally {

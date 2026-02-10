@@ -1,6 +1,6 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, memoryLocalCache } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
@@ -23,7 +23,14 @@ export const auth = (() => {
   return initializeAuth(app, { persistence: getReactNativePersistence(AsyncStorage) });
 })();
 
-export const db = getFirestore(app);
+// Use memoryLocalCache to avoid BloomFilter warnings with persistent cache.
+export const db = (() => {
+  try {
+    return initializeFirestore(app, { localCache: memoryLocalCache() });
+  } catch {
+    return getFirestore(app);
+  }
+})();
 
 export const ADMIN_EMAILS = (process.env.EXPO_PUBLIC_ADMIN_EMAILS ?? '')
   .split(',')

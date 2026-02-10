@@ -5,7 +5,7 @@ import { Tabs } from 'expo-router';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import { isAdmin, watchAuth } from '@/src/auth';
 import { auth, db } from '@/src/firebase';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
@@ -23,7 +23,25 @@ export default function TabLayout() {
     return watchAuth((u) => setEmail(u?.email ?? null));
   }, []);
 
-  const admin = useMemo(() => isAdmin(email), [email]);
+  const envAdmin = useMemo(() => isAdmin(email), [email]);
+
+  // Listen to Firestore for dynamically assigned admin/owner roles.
+  const [isOwnerDoc, setIsOwnerDoc] = useState(false);
+  const [isAdminDoc, setIsAdminDoc] = useState(false);
+
+  useEffect(() => {
+    if (!email) {
+      setIsOwnerDoc(false);
+      setIsAdminDoc(false);
+      return;
+    }
+    const key = email.trim().toLowerCase();
+    const unsubOwner = onSnapshot(doc(db, 'owners', key), (s) => setIsOwnerDoc(s.exists()), () => setIsOwnerDoc(false));
+    const unsubAdmin = onSnapshot(doc(db, 'admins', key), (s) => setIsAdminDoc(s.exists()), () => setIsAdminDoc(false));
+    return () => { unsubOwner(); unsubAdmin(); };
+  }, [email]);
+
+  const admin = envAdmin || isOwnerDoc || isAdminDoc;
 
   const [pendingRequests, setPendingRequests] = useState(0);
 
