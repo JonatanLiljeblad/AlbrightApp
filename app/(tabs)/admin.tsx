@@ -23,6 +23,7 @@ export default function AdminScreen() {
 
   const [permOpen, setPermOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
+  const [reqOpen, setReqOpen] = useState(false);
   const [owners, setOwners] = useState<RoleDoc[]>([]);
   const [admins, setAdmins] = useState<RoleDoc[]>([]);
   const [newOwner, setNewOwner] = useState('');
@@ -200,23 +201,8 @@ export default function AdminScreen() {
       <ScrollView contentContainerStyle={styles.page}>
         <Card style={styles.card} mode="elevated">
           <Card.Content>
-          <View style={styles.btnRow}>
-            {owner && (
-              <Button style={styles.halfBtn} mode="contained" disabled={busy} onPress={() => setPermOpen(true)}>
-                Manage permissions
-              </Button>
-            )}
-            <Button style={styles.halfBtn} mode="contained" disabled={busy} onPress={() => setHistOpen(true)}>
-              View history
-            </Button>
-          </View>
-
           {owner && (
             <>
-              <Text style={styles.muted}>
-                {owners.length} owner{owners.length === 1 ? '' : 's'} • {admins.length} admin{admins.length === 1 ? '' : 's'}
-              </Text>
-
               <Text style={styles.section}>Owners</Text>
               {owners.length === 0 ? (
                 <Text style={styles.muted}>No owners found.</Text>
@@ -241,24 +227,21 @@ export default function AdminScreen() {
             </>
           )}
 
-          <Text style={styles.section}>Access requests</Text>
-          {requests.length === 0 ? (
-            <Text>No pending requests.</Text>
-          ) : (
-            requests.map((r) => (
-              <Card key={r.email} style={styles.req} mode="outlined">
-                <Card.Title title={r.name || r.email} subtitle={r.email} />
-                <Card.Actions style={styles.actions}>
-                  <Button disabled={busy} mode="contained-tonal" onPress={() => decide(r.email, false)}>
-                    Deny
-                  </Button>
-                  <Button disabled={busy} mode="contained" onPress={() => decide(r.email, true)}>
-                    Allow
-                  </Button>
-                </Card.Actions>
-              </Card>
-            ))
-          )}
+          <View style={styles.btnGroup}>
+            <View style={styles.btnRow}>
+              {owner && (
+                <Button style={styles.halfBtn} mode="contained" disabled={busy} onPress={() => setPermOpen(true)}>
+                  Manage permissions
+                </Button>
+              )}
+              <Button style={styles.halfBtn} mode="contained" disabled={busy} onPress={() => setHistOpen(true)}>
+                View history
+              </Button>
+            </View>
+            <Button mode="contained" disabled={busy} onPress={() => setReqOpen(true)}>
+              Access requests{requests.length > 0 ? ` (${requests.length})` : ''}
+            </Button>
+          </View>
         </Card.Content>
         </Card>
       </ScrollView>
@@ -365,6 +348,42 @@ export default function AdminScreen() {
         </Dialog>
       </Portal>
 
+      <Portal>
+        <Dialog visible={reqOpen} onDismiss={() => setReqOpen(false)} style={styles.dialog}>
+          <Dialog.Title style={styles.dialogTitle}>Access Requests</Dialog.Title>
+          <Dialog.ScrollArea style={styles.scrollArea}>
+            <Dialog.Content style={styles.dialogContent}>
+              {requests.length === 0 ? (
+                <Text>No pending requests.</Text>
+              ) : (
+                requests.map((r) => (
+                  <Card key={r.email} style={styles.req} mode="outlined">
+                    <Card.Title title={r.name || r.email} subtitle={r.email} />
+                    <Card.Actions style={styles.actions}>
+                      <Button disabled={busy} mode="contained-tonal" onPress={() => decide(r.email, false)}>
+                        Deny
+                      </Button>
+                      <Button disabled={busy} mode="contained" onPress={() => decide(r.email, true)}>
+                        Allow
+                      </Button>
+                    </Card.Actions>
+                  </Card>
+                ))
+              )}
+            </Dialog.Content>
+          </Dialog.ScrollArea>
+          <Dialog.Actions style={styles.dialogActions}>
+            <Button
+              style={styles.closeBtn}
+              contentStyle={styles.closeBtnContent}
+              mode="contained"
+              onPress={() => setReqOpen(false)}>
+              Close
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
       <HistoryDialog visible={histOpen} onDismiss={() => setHistOpen(false)} />
     </>
   );
@@ -381,7 +400,8 @@ const styles = StyleSheet.create({
   closeBtn: { minWidth: 160 },
   closeBtnContent: { paddingVertical: 6 },
 
-  btnRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  btnGroup: { marginTop: 18, gap: 10 },
+  btnRow: { flexDirection: 'row', gap: 10 },
   halfBtn: { flex: 1 },
   req: { marginTop: 12 },
   muted: { opacity: 0.7, marginBottom: 10 },

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Dimensions, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ActivityIndicator, Button, Card, Dialog, IconButton, Portal, Text } from 'react-native-paper';
 import { db } from '@/src/firebase';
 import { hourLabel, pad2 } from '@/src/time';
@@ -325,7 +325,7 @@ const s = StyleSheet.create({
   dlgTitle: { width: '100%', textAlign: 'center', paddingHorizontal: 0 },
   dlgContent: { paddingBottom: 16 },
   dlgActions: { justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 8, gap: 8 },
-  scrollArea: { maxHeight: 620, borderTopWidth: 0, borderBottomWidth: 0 },
+  scrollArea: { maxHeight: Dimensions.get('window').height * 0.65, borderTopWidth: 0, borderBottomWidth: 0 },
   closeBtn: { minWidth: 120 },
   closeBtnIn: { paddingVertical: 6 },
   loader: { marginVertical: 24 },
