@@ -239,7 +239,7 @@ export default function AdminScreen() {
           <Card.Content>
             {owner && (
               <>
-                <Text style={styles.section}>Owners TEST</Text>
+                <Text style={styles.section}>Owners</Text>
                 {owners.length === 0 ? (
                   <Text style={styles.muted}>No owners found.</Text>
                 ) : (
