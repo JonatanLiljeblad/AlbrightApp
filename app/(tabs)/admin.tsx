@@ -13,7 +13,13 @@ import {
   where,
 } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, ScrollView, StyleSheet, View } from "react-native";
+import {
+  Alert,
+  Dimensions,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 import {
   Badge,
   Button,
@@ -316,7 +322,7 @@ export default function AdminScreen() {
         >
           <Dialog.Title style={styles.dialogTitle}>Permissions</Dialog.Title>
           <Dialog.ScrollArea style={styles.scrollArea}>
-            <Dialog.Content style={styles.dialogContent}>
+            <ScrollView contentContainerStyle={styles.scrollContent}>
               <Text style={styles.section}>Owners</Text>
               {owners.length === 0 ? (
                 <Text style={styles.muted}>No owners found.</Text>
@@ -412,7 +418,7 @@ export default function AdminScreen() {
                   Add
                 </Button>
               </View>
-            </Dialog.Content>
+            </ScrollView>
           </Dialog.ScrollArea>
           <Dialog.Actions style={styles.dialogActions}>
             <Button
@@ -437,7 +443,7 @@ export default function AdminScreen() {
             Access Requests
           </Dialog.Title>
           <Dialog.ScrollArea style={styles.scrollArea}>
-            <Dialog.Content style={styles.dialogContent}>
+            <ScrollView contentContainerStyle={styles.scrollContent}>
               {requests.length === 0 ? (
                 <Text>No pending requests.</Text>
               ) : (
@@ -463,7 +469,7 @@ export default function AdminScreen() {
                   </Card>
                 ))
               )}
-            </Dialog.Content>
+            </ScrollView>
           </Dialog.ScrollArea>
           <Dialog.Actions style={styles.dialogActions}>
             <Button
@@ -490,7 +496,12 @@ const styles = StyleSheet.create({
 
   dialog: { alignSelf: "center", width: "94%", maxWidth: 560 },
   dialogTitle: { width: "100%", textAlign: "center", paddingHorizontal: 0 },
-  dialogContent: { paddingBottom: 16 },
+  scrollArea: {
+    maxHeight: Dimensions.get("window").height * 0.6,
+    borderTopWidth: 0,
+    borderBottomWidth: 0,
+  },
+  scrollContent: { paddingHorizontal: 24, paddingBottom: 16 },
   dialogActions: {
     justifyContent: "center",
     paddingHorizontal: 24,
@@ -511,5 +522,4 @@ const styles = StyleSheet.create({
   addRow: { marginTop: 10, gap: 8 },
   input: { width: "100%" },
   addBtn: { alignSelf: "flex-end" },
-  scrollArea: { maxHeight: 620, borderTopWidth: 0, borderBottomWidth: 0 },
 });

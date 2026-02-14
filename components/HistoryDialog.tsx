@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Dimensions, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Dimensions, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ActivityIndicator, Button, Card, Dialog, IconButton, Portal, Text } from 'react-native-paper';
 import { db } from '@/src/firebase';
 import { hourLabel, pad2 } from '@/src/time';
@@ -234,7 +234,7 @@ export default function HistoryDialog({
       <Dialog visible={visible} onDismiss={onDismiss} style={s.dialog}>
         <Dialog.Title style={s.dlgTitle}>{title}</Dialog.Title>
         <Dialog.ScrollArea style={s.scrollArea}>
-          <Dialog.Content style={s.dlgContent}>
+          <ScrollView contentContainerStyle={s.scrollContent}>
             {loading ? (
               <ActivityIndicator style={s.loader} />
             ) : mode === 'menu' ? (
@@ -303,7 +303,7 @@ export default function HistoryDialog({
                 )}
               </>
             ) : null}
-          </Dialog.Content>
+          </ScrollView>
         </Dialog.ScrollArea>
         <Dialog.Actions style={s.dlgActions}>
           {mode !== 'menu' && (
@@ -323,7 +323,7 @@ export default function HistoryDialog({
 const s = StyleSheet.create({
   dialog: { alignSelf: 'center', width: '94%', maxWidth: 560 },
   dlgTitle: { width: '100%', textAlign: 'center', paddingHorizontal: 0 },
-  dlgContent: { paddingBottom: 16 },
+  scrollContent: { paddingHorizontal: 24, paddingBottom: 16 },
   dlgActions: { justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 8, gap: 8 },
   scrollArea: { maxHeight: Dimensions.get('window').height * 0.65, borderTopWidth: 0, borderBottomWidth: 0 },
   closeBtn: { minWidth: 120 },

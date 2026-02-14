@@ -20,6 +20,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Dimensions,
+  ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
@@ -228,7 +229,7 @@ export default function ReserveDialog({
       <Dialog visible={visible} onDismiss={onDismiss} style={s.dialog}>
         <Dialog.Title style={s.dlgTitle}>{dlgTitle}</Dialog.Title>
         <Dialog.ScrollArea style={s.scrollArea}>
-          <Dialog.Content style={s.dlgContent}>
+          <ScrollView contentContainerStyle={s.scrollContent}>
             {mode === "menu" ? (
               <View style={s.menu}>
                 <Button
@@ -344,7 +345,7 @@ export default function ReserveDialog({
                 )}
               </>
             )}
-          </Dialog.Content>
+          </ScrollView>
         </Dialog.ScrollArea>
         <Dialog.Actions style={s.dlgActions}>
           {mode !== "menu" && (
@@ -378,12 +379,10 @@ export default function ReserveDialog({
   );
 }
 
-const SCREEN_H = Dimensions.get("window").height;
-
 const s = StyleSheet.create({
   dialog: { alignSelf: "center", width: "94%", maxWidth: 560 },
   dlgTitle: { width: "100%", textAlign: "center", paddingHorizontal: 0 },
-  dlgContent: { paddingBottom: 16 },
+  scrollContent: { paddingHorizontal: 24, paddingBottom: 16 },
   dlgActions: {
     justifyContent: "center",
     paddingHorizontal: 24,
@@ -391,7 +390,7 @@ const s = StyleSheet.create({
     gap: 8,
   },
   scrollArea: {
-    maxHeight: SCREEN_H * 0.6,
+    maxHeight: Dimensions.get("window").height * 0.6,
     borderTopWidth: 0,
     borderBottomWidth: 0,
   },
