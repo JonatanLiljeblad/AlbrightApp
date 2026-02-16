@@ -4,6 +4,7 @@ import {
   hourLabel,
   hourSlot,
   hoursRange,
+  slotEndMs,
   startOfDay,
   toYmd,
 } from "@/src/time";
@@ -52,9 +53,10 @@ export default function ReserveDialog({
   const [bookingSlots, setBookingSlots] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const date = useMemo(() => toYmd(selectedDay), [selectedDay]);
-  const todayYmd = useMemo(() => toYmd(new Date()), []);
+  const todayYmd = useMemo(() => toYmd(new Date(nowMs)), [nowMs]);
   const canGoBack = date > todayYmd;
   const hours = useMemo(() => hoursRange(8, 21), []);
 
@@ -85,6 +87,13 @@ export default function ReserveDialog({
     setTitle("");
     setSelected(new Set());
     setSelectedDay(startOfDay(new Date()));
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    setNowMs(Date.now());
+    const t = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(t);
   }, [visible]);
 
   // Live data for selected date
@@ -123,12 +132,20 @@ export default function ReserveDialog({
   }, [visible, date]);
 
   function toggleSlot(slot: string) {
+    if (isPastSlot(slot)) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(slot)) next.delete(slot);
       else next.add(slot);
       return next;
     });
+  }
+
+  function isPastSlot(slot: string, atMs = nowMs) {
+    const currentYmd = toYmd(new Date(atMs));
+    if (date < currentYmd) return true;
+    if (date > currentYmd) return false;
+    return atMs >= slotEndMs(date, slot);
   }
 
   async function reserve() {
@@ -138,6 +155,10 @@ export default function ReserveDialog({
     try {
       setBusy(true);
       const slots = Array.from(selected).sort();
+      const passed = slots.filter((slot) => isPastSlot(slot, Date.now()));
+      if (passed.length > 0) {
+        throw new Error(`Slot(s) ${passed.join(", ")} have already passed.`);
+      }
 
       await runTransaction(db, async (tx) => {
         const reads = await Promise.all(
@@ -269,17 +290,19 @@ export default function ReserveDialog({
                 <View style={s.grid}>
                   {hours.map((h) => {
                     const slot = hourSlot(h);
+                    const isPast = isPastSlot(slot);
                     const isBooked =
                       slotData.has(slot) && bookingSlots.has(slot);
                     const isReserved =
                       slotData.has(slot) && !bookingSlots.has(slot);
-                    const taken = isBooked || isReserved;
+                    const taken = isBooked || isReserved || isPast;
                     const sel = selected.has(slot);
                     return (
                       <TouchableOpacity
                         key={slot}
                         style={[
                           s.chip,
+                          isPast && s.chipPast,
                           isBooked && s.chipBooked,
                           isReserved && s.chipReserved,
                           sel && s.chipSelected,
@@ -290,6 +313,7 @@ export default function ReserveDialog({
                         <Text
                           style={[
                             s.chipText,
+                            isPast && s.chipTextPast,
                             isBooked && s.chipTextBooked,
                             isReserved && s.chipTextReserved,
                             sel && s.chipTextSelected,
@@ -426,6 +450,7 @@ const s = StyleSheet.create({
     borderColor: "#2A2A2A",
     backgroundColor: "#141414",
   },
+  chipPast: { opacity: 0.3, backgroundColor: "#0B0B0B" },
   chipSpacer: { flexBasis: "31%", flexGrow: 1 },
   chipBooked: { opacity: 0.3, backgroundColor: "#0B0B0B" },
   chipReserved: {
@@ -435,6 +460,7 @@ const s = StyleSheet.create({
   },
   chipSelected: { backgroundColor: "#D7263D", borderColor: "#D7263D" },
   chipText: { color: "#FFFFFF", fontSize: 13 },
+  chipTextPast: { textDecorationLine: "line-through" },
   chipTextBooked: { textDecorationLine: "line-through" },
   chipTextReserved: { color: "#D7263D" },
   chipTextSelected: { color: "#FFFFFF", fontWeight: "700" },
