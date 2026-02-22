@@ -43,6 +43,7 @@ export default function AdminScreen() {
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [ownerDoc, setOwnerDoc] = useState(false);
   const [adminDoc, setAdminDoc] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [permOpen, setPermOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
@@ -54,12 +55,35 @@ export default function AdminScreen() {
   const [newAdmin, setNewAdmin] = useState("");
 
   useEffect(() => {
-    if (!me) return;
-    const unsubOwner = onSnapshot(doc(db, "owners", me), (s) =>
-      setOwnerDoc(s.exists()),
+    if (!me) {
+      setOwnerDoc(false);
+      setAdminDoc(false);
+      setLoadError(null);
+      return;
+    }
+    const unsubOwner = onSnapshot(
+      doc(db, "owners", me),
+      (s) => {
+        setLoadError(null);
+        setOwnerDoc(s.exists());
+      },
+      (e) => {
+        console.warn("[AdminScreen] Failed owner role lookup", e);
+        setOwnerDoc(false);
+        setLoadError("Could not verify admin access right now.");
+      },
     );
-    const unsubAdmin = onSnapshot(doc(db, "admins", me), (s) =>
-      setAdminDoc(s.exists()),
+    const unsubAdmin = onSnapshot(
+      doc(db, "admins", me),
+      (s) => {
+        setLoadError(null);
+        setAdminDoc(s.exists());
+      },
+      (e) => {
+        console.warn("[AdminScreen] Failed admin role lookup", e);
+        setAdminDoc(false);
+        setLoadError("Could not verify admin access right now.");
+      },
     );
     return () => {
       unsubOwner();
@@ -76,6 +100,7 @@ export default function AdminScreen() {
   useEffect(() => {
     if (!canAdmin) {
       setRequests([]);
+      setLoadError(null);
       return;
     }
     const q = query(
@@ -84,8 +109,14 @@ export default function AdminScreen() {
     );
     const unsub = onSnapshot(
       q,
-      (snap) => setRequests(snap.docs.map((d) => d.data() as AccessRequest)),
-      () => {},
+      (snap) => {
+        setLoadError(null);
+        setRequests(snap.docs.map((d) => d.data() as AccessRequest));
+      },
+      (e) => {
+        console.warn("[AdminScreen] Failed loading access requests", e);
+        setLoadError("Could not load access requests.");
+      },
     );
     return unsub;
   }, [canAdmin]);
@@ -99,23 +130,33 @@ export default function AdminScreen() {
 
     const unsubOwners = onSnapshot(
       collection(db, "owners"),
-      (snap) =>
+      (snap) => {
+        setLoadError(null);
         setOwners(
           snap.docs
             .map((d) => d.data() as RoleDoc)
             .sort((a, b) => a.email.localeCompare(b.email)),
-        ),
-      () => {},
+        );
+      },
+      (e) => {
+        console.warn("[AdminScreen] Failed loading owners", e);
+        setLoadError("Could not load role assignments.");
+      },
     );
     const unsubAdmins = onSnapshot(
       collection(db, "admins"),
-      (snap) =>
+      (snap) => {
+        setLoadError(null);
         setAdmins(
           snap.docs
             .map((d) => d.data() as RoleDoc)
             .sort((a, b) => a.email.localeCompare(b.email)),
-        ),
-      () => {},
+        );
+      },
+      (e) => {
+        console.warn("[AdminScreen] Failed loading admins", e);
+        setLoadError("Could not load role assignments.");
+      },
     );
 
     return () => {
@@ -152,6 +193,7 @@ export default function AdminScreen() {
               { merge: true },
             );
           } catch (e: any) {
+            console.warn("[AdminScreen] Failed adding role", e);
             Alert.alert("Error", e?.message ?? "Failed");
           } finally {
             setBusy(false);
@@ -183,6 +225,7 @@ export default function AdminScreen() {
             setBusy(true);
             await deleteDoc(doc(db, role, key));
           } catch (e: any) {
+            console.warn("[AdminScreen] Failed removing role", e);
             Alert.alert("Error", e?.message ?? "Failed");
           } finally {
             setBusy(false);
@@ -221,6 +264,7 @@ export default function AdminScreen() {
         );
       }
     } catch (e: any) {
+      console.warn("[AdminScreen] Failed deciding request", e);
       Alert.alert("Error", e?.message ?? "Failed");
     } finally {
       setBusy(false);
@@ -243,6 +287,7 @@ export default function AdminScreen() {
       <ScrollView contentContainerStyle={styles.page}>
         <Card style={styles.card} mode="elevated">
           <Card.Content>
+            {!!loadError && <Text style={styles.error}>{loadError}</Text>}
             {owner && (
               <>
                 <Text style={styles.section}>Owners</Text>
@@ -485,7 +530,11 @@ export default function AdminScreen() {
       </Portal>
 
       <HistoryDialog visible={histOpen} onDismiss={() => setHistOpen(false)} />
-      <ReserveDialog visible={resOpen} onDismiss={() => setResOpen(false)} />
+      <ReserveDialog
+        visible={resOpen}
+        onDismiss={() => setResOpen(false)}
+        reservedByRole={owner ? "owner" : "admin"}
+      />
     </>
   );
 }
@@ -514,6 +563,7 @@ const styles = StyleSheet.create({
   btnContent: { paddingVertical: 8 },
   badge: { position: "absolute", top: -4, right: -4 },
   req: { marginTop: 12 },
+  error: { color: "#D7263D", marginBottom: 8 },
   muted: { opacity: 0.7, marginBottom: 10 },
   section: { marginTop: 18, marginBottom: 8, fontWeight: "700" },
   actions: { justifyContent: "flex-end", gap: 8 },

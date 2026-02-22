@@ -27,7 +27,8 @@ export const auth = (() => {
 export const db = (() => {
   try {
     return initializeFirestore(app, { localCache: memoryLocalCache() });
-  } catch {
+  } catch (e) {
+    console.warn('[firebase.db] Falling back to default Firestore init', e);
     return getFirestore(app);
   }
 })();

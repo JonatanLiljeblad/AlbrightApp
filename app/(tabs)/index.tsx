@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, StyleSheet, View } from 'react-native';
 import { Button, Card, IconButton, ProgressBar, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
-import { canBook } from '@/src/bookingRules';
+import { assertCanBookInTransaction, canBook } from '@/src/bookingRules';
 import { addDays, hourLabel, hourSlot, hoursRange, slotStartMs as slotStartMsUtil, startOfDay, toYmd } from '@/src/time';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, doc, getDocs, onSnapshot, runTransaction } from 'firebase/firestore';
@@ -12,6 +12,7 @@ type SlotRow = { slot: string; label: string; bookedBy?: string };
 export default function ScheduleScreen() {
   const [rows, setRows] = useState<SlotRow[]>([]);
   const [busySlot, setBusySlot] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
@@ -64,11 +65,13 @@ export default function ScheduleScreen() {
 
   async function refreshOnce() {
     try {
+      setLoadError(null);
       const ref = collection(db, 'schedule', date, 'slots');
       const snap = await getDocs(ref);
       setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
-    } catch {
-      // Ignore permission errors; UI will still be usable after rules are set.
+    } catch (e) {
+      console.warn('[ScheduleScreen] Refresh failed', e);
+      setLoadError('Could not refresh schedule right now.');
     }
   }
 
@@ -77,14 +80,21 @@ export default function ScheduleScreen() {
   useEffect(() => onAuthStateChanged(auth, (u) => setUid(u?.uid ?? null)), []);
 
   useEffect(() => {
-    if (!uid) return;
+    if (!uid) {
+      setLoadError(null);
+      return;
+    }
     setRows([]);
     const ref = collection(db, 'schedule', date, 'slots');
     const unsub = onSnapshot(
       ref,
-      (snap) => setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
-      () => {
-        // Ignore permission errors during auth transitions.
+      (snap) => {
+        setLoadError(null);
+        setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
+      },
+      (e) => {
+        console.warn('[ScheduleScreen] Live schedule subscription failed', e);
+        setLoadError('Could not load schedule right now.');
       }
     );
     return unsub;
@@ -113,6 +123,7 @@ export default function ScheduleScreen() {
       await runTransaction(db, async (tx) => {
         const existing = await tx.get(slotRef);
         if (existing.exists()) throw new Error('This slot is already booked.');
+        await assertCanBookInTransaction(tx, u.uid, date, slot);
 
         const payload = {
           date,
@@ -128,6 +139,7 @@ export default function ScheduleScreen() {
       });
 
     } catch (e: any) {
+      console.warn('[ScheduleScreen] Booking failed', e);
       Alert.alert('Error', e?.message ?? 'Failed to book');
     } finally {
       setBusySlot(null);
@@ -151,6 +163,7 @@ export default function ScheduleScreen() {
             </Button>
           </View>
           <Text style={styles.muted}>Tap a time to book it. Booked slots show the name.</Text>
+          {!!loadError && <Text style={styles.error}>{loadError}</Text>}
         </Card.Content>
       </Card>
 
@@ -203,6 +216,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { margin: 16, borderRadius: 16 },
   muted: { opacity: 0.7 },
+  error: { marginTop: 8, color: '#D7263D' },
   navRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
   list: { padding: 16, paddingTop: 0, gap: 10 },
   row: { borderRadius: 14 },

@@ -3,6 +3,7 @@ import { Alert, StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { slotEndMs } from '@/src/time';
+import { removeBookingFromGuardInTransaction } from '@/src/bookingRules';
 import type { Booking } from '@/src/types';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, doc, onSnapshot, query, runTransaction, where } from 'firebase/firestore';
@@ -10,6 +11,7 @@ import { collection, doc, onSnapshot, query, runTransaction, where } from 'fireb
 export default function MyBookingsScreen() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   function activeBookings(docs: Array<{ data: Booking }>) {
     const now = Date.now();
@@ -28,15 +30,20 @@ export default function MyBookingsScreen() {
   useEffect(() => onAuthStateChanged(auth, (u) => setUid(u?.uid ?? null)), []);
 
   useEffect(() => {
-    if (!uid) return;
+    if (!uid) {
+      setLoadError(null);
+      return;
+    }
     const q = query(collection(db, 'bookings'), where('userId', '==', uid));
     const unsub = onSnapshot(
       q,
       (snap) => {
+        setLoadError(null);
         setBookings(activeBookings(snap.docs.map((d) => ({ data: d.data() as Booking }))));
       },
-      () => {
-        // Ignore permission errors during auth transitions.
+      (e) => {
+        console.warn('[MyBookingsScreen] Live bookings subscription failed', e);
+        setLoadError('Could not load your bookings right now.');
       }
     );
     return unsub;
@@ -64,8 +71,10 @@ export default function MyBookingsScreen() {
 
         tx.delete(bookingRef);
         tx.delete(slotRef);
+        await removeBookingFromGuardInTransaction(tx, u.uid, b.date, b.slot);
       });
     } catch (e: any) {
+      console.warn('[MyBookingsScreen] Unbook failed', e);
       Alert.alert('Error', e?.message ?? 'Failed to unbook');
     } finally {
       setBusyKey(null);
@@ -76,6 +85,7 @@ export default function MyBookingsScreen() {
     <Card style={styles.card} mode="elevated">
       <Card.Title title="My bookings" />
       <Card.Content>
+        {!!loadError && <Text style={styles.error}>{loadError}</Text>}
         {bookings.length === 0 ? (
           <Text>You have no active bookings.</Text>
         ) : (
@@ -101,5 +111,6 @@ export default function MyBookingsScreen() {
 
 const styles = StyleSheet.create({
   card: { margin: 16, borderRadius: 16 },
+  error: { marginBottom: 10, color: '#D7263D' },
   item: { marginTop: 12, borderRadius: 14 },
 });

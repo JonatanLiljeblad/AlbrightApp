@@ -42,9 +42,11 @@ type Mode = "menu" | "reserve" | "manage";
 export default function ReserveDialog({
   visible,
   onDismiss,
+  reservedByRole,
 }: {
   visible: boolean;
   onDismiss: () => void;
+  reservedByRole: "owner" | "admin";
 }) {
   const [mode, setMode] = useState<Mode>("menu");
   const [title, setTitle] = useState("");
@@ -53,6 +55,7 @@ export default function ReserveDialog({
   const [bookingSlots, setBookingSlots] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const date = useMemo(() => toYmd(selectedDay), [selectedDay]);
@@ -86,6 +89,7 @@ export default function ReserveDialog({
     setMode("menu");
     setTitle("");
     setSelected(new Set());
+    setLoadError(null);
     setSelectedDay(startOfDay(new Date()));
   }, [visible]);
 
@@ -105,11 +109,15 @@ export default function ReserveDialog({
     const unsubSlots = onSnapshot(
       slotsRef,
       (snap) => {
+        setLoadError(null);
         const map = new Map<string, SlotInfo>();
         snap.docs.forEach((d) => map.set(d.id, d.data() as SlotInfo));
         setSlotData(map);
       },
-      () => {},
+      (e) => {
+        console.warn("[ReserveDialog] Failed loading schedule slots", e);
+        setLoadError("Could not load schedule data.");
+      },
     );
 
     const bookingsQ = query(
@@ -118,11 +126,16 @@ export default function ReserveDialog({
     );
     const unsubBookings = onSnapshot(
       bookingsQ,
-      (snap) =>
+      (snap) => {
+        setLoadError(null);
         setBookingSlots(
           new Set(snap.docs.map((d) => (d.data() as SlotInfo).slot)),
-        ),
-      () => {},
+        );
+      },
+      (e) => {
+        console.warn("[ReserveDialog] Failed loading booking slots", e);
+        setLoadError("Could not load booking data.");
+      },
     );
 
     return () => {
@@ -177,13 +190,17 @@ export default function ReserveDialog({
         }
 
         for (const { slot, slotRef } of reads) {
+          const reason = title.trim();
           tx.set(slotRef, {
             date,
             slot,
             userId: u.uid,
-            name: title.trim(),
+            name: reason,
             email: u.email || "",
             createdAt: Date.now(),
+            reservedByRole,
+            reservedByUid: u.uid,
+            reason,
           });
         }
       });
@@ -191,6 +208,7 @@ export default function ReserveDialog({
       setSelected(new Set());
       setTitle("");
     } catch (e: any) {
+      console.warn("[ReserveDialog] Reserve failed", e);
       Alert.alert("Error", e?.message ?? "Failed to reserve");
     } finally {
       setBusy(false);
@@ -202,6 +220,7 @@ export default function ReserveDialog({
       setBusy(true);
       await deleteDoc(doc(db, "schedule", date, "slots", slot));
     } catch (e: any) {
+      console.warn("[ReserveDialog] Unreserve failed", e);
       Alert.alert("Error", e?.message ?? "Failed to unreserve");
     } finally {
       setBusy(false);
@@ -251,6 +270,7 @@ export default function ReserveDialog({
         <Dialog.Title style={s.dlgTitle}>{dlgTitle}</Dialog.Title>
         <Dialog.ScrollArea style={s.scrollArea}>
           <ScrollView contentContainerStyle={s.scrollContent}>
+            {!!loadError && <Text style={s.errorText}>{loadError}</Text>}
             {mode === "menu" ? (
               <View style={s.menu}>
                 <Button
@@ -438,6 +458,7 @@ const s = StyleSheet.create({
   titleInput: { marginBottom: 14 },
   hint: { opacity: 0.6, marginBottom: 10, fontSize: 13 },
   emptyText: { opacity: 0.6, textAlign: "center", marginTop: 16 },
+  errorText: { color: "#D7263D", marginBottom: 10 },
 
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   chip: {

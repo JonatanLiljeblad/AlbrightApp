@@ -4,10 +4,11 @@ import { ActivityIndicator, Button, Card, Dialog, IconButton, Portal, Text } fro
 import { db } from '@/src/firebase';
 import { hourLabel, pad2 } from '@/src/time';
 import type { Booking } from '@/src/types';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query, startAfter, type DocumentData, type QueryDocumentSnapshot } from 'firebase/firestore';
 
 type Mode = 'menu' | 'by-user' | 'by-day';
 type UserGroup = { name: string; email: string; userId: string; bookings: Booking[] };
+const PAGE_SIZE = 200;
 
 function daysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate();
@@ -45,6 +46,9 @@ export default function HistoryDialog({
   const [mode, setMode] = useState<Mode>('menu');
   const [allBookings, setAllBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMore, setHasMore] = useState(false);
 
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
 
@@ -56,23 +60,35 @@ export default function HistoryDialog({
   useEffect(() => {
     if (!visible) return;
     setMode('menu');
+    setAllBookings([]);
+    setError(null);
+    setCursor(null);
+    setHasMore(false);
     setSelectedUser(null);
     setSelectedDate(null);
     const n = new Date();
     setCalYear(n.getFullYear());
     setCalMonth(n.getMonth());
-    fetchAll();
+    fetchPage(true);
   }, [visible]);
 
-  async function fetchAll() {
+  async function fetchPage(reset: boolean) {
     try {
       setLoading(true);
-      const snap = await getDocs(collection(db, 'bookings'));
+      setError(null);
+      const ref = collection(db, 'bookings');
+      const q = reset || !cursor
+        ? query(ref, orderBy('createdAt', 'desc'), limit(PAGE_SIZE))
+        : query(ref, orderBy('createdAt', 'desc'), startAfter(cursor), limit(PAGE_SIZE));
+      const snap = await getDocs(q);
       const docs = snap.docs.map((d) => d.data() as Booking);
-      docs.sort((a, b) => `${b.date}_${b.slot}`.localeCompare(`${a.date}_${a.slot}`));
-      setAllBookings(docs);
-    } catch {
-      setAllBookings([]);
+      setAllBookings((prev) => (reset ? docs : prev.concat(docs)));
+      setCursor(snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null);
+      setHasMore(snap.docs.length === PAGE_SIZE);
+    } catch (e) {
+      console.warn('[HistoryDialog] Failed to load history', e);
+      setError('Could not load booking history.');
+      if (reset) setAllBookings([]);
     } finally {
       setLoading(false);
     }
@@ -235,7 +251,7 @@ export default function HistoryDialog({
         <Dialog.Title style={s.dlgTitle}>{title}</Dialog.Title>
         <Dialog.ScrollArea style={s.scrollArea}>
           <ScrollView contentContainerStyle={s.scrollContent}>
-            {loading ? (
+            {loading && allBookings.length === 0 ? (
               <ActivityIndicator style={s.loader} />
             ) : mode === 'menu' ? (
               <View style={s.menu}>
@@ -303,6 +319,13 @@ export default function HistoryDialog({
                 )}
               </>
             ) : null}
+            {!!error && <Text style={s.errorText}>{error}</Text>}
+            {hasMore && mode !== 'menu' && (
+              <Button mode="text" onPress={() => fetchPage(false)} disabled={loading} style={s.loadMoreBtn}>
+                Load older history
+              </Button>
+            )}
+            {loading && allBookings.length > 0 && <ActivityIndicator style={s.loaderMore} />}
           </ScrollView>
         </Dialog.ScrollArea>
         <Dialog.Actions style={s.dlgActions}>
@@ -329,12 +352,15 @@ const s = StyleSheet.create({
   closeBtn: { minWidth: 120 },
   closeBtnIn: { paddingVertical: 6 },
   loader: { marginVertical: 24 },
+  loaderMore: { marginTop: 12 },
 
   menu: { gap: 12, marginTop: 8 },
   menuBtn: {},
   menuBtnIn: { paddingVertical: 10 },
 
   item: { marginTop: 8, borderRadius: 12 },
+  errorText: { color: '#D7263D', marginTop: 10 },
+  loadMoreBtn: { marginTop: 10, alignSelf: 'center' },
   chevron: { fontSize: 24, opacity: 0.5, marginRight: 16 },
   muted: { opacity: 0.7 },
   section: { marginTop: 16, marginBottom: 4, fontWeight: '700' },

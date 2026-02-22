@@ -46,6 +46,14 @@ service cloud.firestore {
       return date + '_' + slot + '_' + uid;
     }
 
+    function schedulePath(date, slot) {
+      return /databases/$(database)/documents/schedule/$(date)/slots/$(slot);
+    }
+
+    function bookingPath(date, slot, uid) {
+      return /databases/$(database)/documents/bookings/$(bookingIdFor(date, slot, uid));
+    }
+
     function isBookingPayload(d, ymd, slotId) {
       return d.keys().hasOnly(['date', 'slot', 'userId', 'name', 'email', 'createdAt'])
         && validYmd(d.date)
@@ -60,6 +68,54 @@ service cloud.firestore {
         && validEmail(d.email)
         && d.email.lower() == emailLower()
         && d.createdAt is int;
+    }
+
+    function isReservationPayload(d, ymd, slotId) {
+      return d.keys().hasOnly([
+          'date', 'slot', 'userId', 'name', 'email', 'createdAt',
+          'reservedByRole', 'reservedByUid', 'reason'
+        ])
+        && validYmd(d.date)
+        && validSlot(d.slot)
+        && d.date == ymd
+        && d.slot == slotId
+        && d.userId == request.auth.uid
+        && d.name is string
+        && d.name.size() >= 1
+        && d.name.size() <= 80
+        && d.email is string
+        && validEmail(d.email)
+        && d.email.lower() == emailLower()
+        && d.createdAt is int
+        && d.reservedByUid == request.auth.uid
+        && d.reservedByRole is string
+        && (
+          (d.reservedByRole == 'owner' && isOwner())
+          || (d.reservedByRole == 'admin' && !isOwner() && isAdmin())
+        )
+        && d.reason is string
+        && d.reason.size() >= 1
+        && d.reason.size() <= 120;
+    }
+
+    // --- bookingGuards validation helpers ---
+    function validGuardEntry(e, uid) {
+      return e is map
+        && e.keys().hasOnly(['id', 'date', 'slot', 'endMs'])
+        && e.id is string
+        && e.date is string
+        && e.slot is string
+        && e.endMs is number
+        && validYmd(e.date)
+        && validSlot(e.slot)
+        && e.id == bookingIdFor(e.date, e.slot, uid)
+        && e.endMs > 0;
+    }
+
+    // Validate entire active list (size <= 2 enforced elsewhere)
+    function validGuardActiveList(active, uid) {
+      return active is list
+        && active.all(e, validGuardEntry(e, uid));
     }
 
     // Allowlist (document id = lowercased email)
@@ -102,15 +158,22 @@ service cloud.firestore {
         && request.resource.data.email.lower() == emailId
         && validEmail(request.resource.data.email)
         && request.resource.data.createdAt is int
-        && request.resource.data.name is string;
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 80;
 
-      // Admin decisions
+      // Admin decisions (LOCKED DOWN KEYS)
       allow update: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'name', 'email', 'status', 'createdAt', 'decidedAt', 'decidedBy'
+        ])
         && request.resource.data.email is string
         && request.resource.data.email.lower() == emailId
         && request.resource.data.status in ['pending', 'approved', 'denied']
         && request.resource.data.createdAt is int
         && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 80
         && (
           // If moving out of pending, require decision metadata.
           request.resource.data.status == 'pending'
@@ -165,8 +228,21 @@ service cloud.firestore {
       allow update: if false;
 
       allow create: if isAllowed()
-        && !exists(/databases/$(database)/documents/schedule/$(date)/slots/$(slot))
-        && isBookingPayload(request.resource.data, date, slot);
+        && !exists(schedulePath(date, slot))
+        && (
+          (
+            isBookingPayload(request.resource.data, date, slot)
+            && !exists(bookingPath(date, slot, request.auth.uid))
+            && existsAfter(bookingPath(date, slot, request.auth.uid))
+            && isBookingPayload(getAfter(bookingPath(date, slot, request.auth.uid)).data, date, slot)
+            && getAfter(bookingPath(date, slot, request.auth.uid)).data.name == request.resource.data.name
+            && getAfter(bookingPath(date, slot, request.auth.uid)).data.email == request.resource.data.email
+            && getAfter(bookingPath(date, slot, request.auth.uid)).data.createdAt == request.resource.data.createdAt
+          )
+          || (
+            isAdmin() && isReservationPayload(request.resource.data, date, slot)
+          )
+        );
 
       allow delete: if signedIn() && (
         resource.data.userId == request.auth.uid || isAdmin()
@@ -183,17 +259,42 @@ service cloud.firestore {
       // Note: atomicity is enforced from the schedule-slot side:
       // creating a schedule slot requires the matching booking doc in the same batch/transaction.
       allow create: if isAllowed()
-        && request.resource.data.keys().hasOnly(['date', 'slot', 'userId', 'name', 'email', 'createdAt'])
-        && validYmd(request.resource.data.date)
-        && validSlot(request.resource.data.slot)
-        && request.resource.data.userId == request.auth.uid
-        && request.resource.data.email is string
-        && request.resource.data.email.lower() == emailLower()
-        && request.resource.data.createdAt is int
-        && bookingId == bookingIdFor(request.resource.data.date, request.resource.data.slot, request.auth.uid);
+        && isBookingPayload(request.resource.data, request.resource.data.date, request.resource.data.slot)
+        && bookingId == bookingIdFor(request.resource.data.date, request.resource.data.slot, request.auth.uid)
+        && !exists(schedulePath(request.resource.data.date, request.resource.data.slot))
+        && existsAfter(schedulePath(request.resource.data.date, request.resource.data.slot))
+        && isBookingPayload(
+          getAfter(schedulePath(request.resource.data.date, request.resource.data.slot)).data,
+          request.resource.data.date,
+          request.resource.data.slot
+        )
+        && getAfter(schedulePath(request.resource.data.date, request.resource.data.slot)).data.userId == request.auth.uid
+        && getAfter(schedulePath(request.resource.data.date, request.resource.data.slot)).data.name == request.resource.data.name
+        && getAfter(schedulePath(request.resource.data.date, request.resource.data.slot)).data.email == request.resource.data.email
+        && getAfter(schedulePath(request.resource.data.date, request.resource.data.slot)).data.createdAt == request.resource.data.createdAt;
 
       allow delete: if signedIn() && (
         resource.data.userId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // Per-user booking guards for active-cap enforcement.
+    match /bookingGuards/{uid} {
+      allow read: if signedIn() && (
+        uid == request.auth.uid || isAdmin()
+      );
+
+      allow create, update: if signedIn()
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['active', 'updatedAt'])
+        && request.resource.data.updatedAt is int
+        && request.resource.data.active is list
+        && request.resource.data.active.size() <= 2
+        && validGuardActiveList(request.resource.data.active, uid);
+
+      // Keep your current behavior; consider denying user delete if you want to prevent "cap reset".
+      allow delete: if signedIn() && (
+        uid == request.auth.uid || isAdmin()
       );
     }
 

@@ -33,7 +33,10 @@ npm run android
 - `allowedEmails/{emailLower}`
 - `accessRequests/{emailLower}`
 - `schedule/{YYYY-MM-DD}/slots/{HH:00}`
+  - Normal booking payload: `date, slot, userId, name, email, createdAt`
+  - Admin/owner reservation payload: adds `reservedByRole, reservedByUid, reason`
 - `bookings/{YYYY-MM-DD}_{HH:00}_{uid}`
+- `bookingGuards/{uid}` (internal active-booking guard state for cap enforcement)
 
 ## Firestore Security Rules (recommended)
 This repo includes a starter `firestore.rules` that enforces:
@@ -55,3 +58,12 @@ To use it, paste `firestore.rules` into Firebase Console → Firestore Database 
 
 ## Notes
 MVP enforces slot exclusivity with a Firestore transaction; advanced constraints should be moved to Security Rules / Cloud Functions.
+
+## Emulator smoke checks (rules)
+Run with Firestore + Auth emulators:
+```bash
+npm run rules:smoke
+```
+
+Migration note:
+- Existing deployments can leave `bookingGuards` empty; they are rebuilt as users book/unbook. Existing booking docs remain source-of-truth for legacy data checks.

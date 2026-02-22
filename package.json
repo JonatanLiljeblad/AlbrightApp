@@ -7,7 +7,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "rules:smoke": "node scripts/firestore-emulator-smoke.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

@@ -19,7 +19,8 @@ export async function isAllowedEmail(email: string) {
   try {
     const snap = await getDoc(doc(db, 'allowedEmails', key));
     return snap.exists();
-  } catch {
+  } catch (e) {
+    console.warn('[auth.isAllowedEmail] Failed allowlist lookup', e);
     // If rules don't allow reading allowlist pre-auth, we treat as not allowed.
     return false;
   }
@@ -45,7 +46,8 @@ async function applySignInPersistence(remember: boolean) {
     const { setPersistence, inMemoryPersistence, getReactNativePersistence } = require('@firebase/auth');
     const AsyncStorage = require('@react-native-async-storage/async-storage').default;
     await setPersistence(auth, remember ? getReactNativePersistence(AsyncStorage) : inMemoryPersistence);
-  } catch {
+  } catch (e) {
+    console.warn('[auth.applySignInPersistence] Failed to apply persistence', e);
     // If persistence isn't supported for some reason, we still allow sign-in.
   }
 }
