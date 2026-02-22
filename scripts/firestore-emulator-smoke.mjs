@@ -1,6 +1,6 @@
 import { deleteApp, initializeApp } from 'firebase/app';
 import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth } from 'firebase/auth';
-import { connectFirestoreEmulator, doc, getFirestore, runTransaction, setDoc } from 'firebase/firestore';
+import { collectionGroup, connectFirestoreEmulator, doc, getDocs, getFirestore, query, runTransaction, setDoc } from 'firebase/firestore';
 
 const projectId = process.env.FIREBASE_PROJECT_ID ?? 'demo-albright';
 const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8080';
@@ -219,6 +219,11 @@ async function main() {
           role: 'admin',
         })
       );
+    });
+
+    await expectAllow('ALLOW admin collectionGroup reservations query', async () => {
+      const q = query(collectionGroup(admin.db, 'slots'));
+      await getDocs(q);
     });
 
     await expectDeny('DENY admin reservation missing reason', async () => {

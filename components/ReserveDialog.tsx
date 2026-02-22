@@ -10,6 +10,7 @@ import {
 } from "@/src/time";
 import {
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   onSnapshot,
@@ -36,7 +37,15 @@ import {
   TextInput,
 } from "react-native-paper";
 
-type SlotInfo = { slot: string; name: string; userId: string };
+type SlotInfo = {
+  slot: string;
+  name: string;
+  userId: string;
+  reservedByRole?: "owner" | "admin";
+  reservedByUid?: string;
+  reason?: string;
+};
+type ReservationInfo = { date: string; slot: string; name: string };
 type Mode = "menu" | "reserve" | "manage";
 
 export default function ReserveDialog({
@@ -53,6 +62,7 @@ export default function ReserveDialog({
   const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
   const [slotData, setSlotData] = useState<Map<string, SlotInfo>>(new Map());
   const [bookingSlots, setBookingSlots] = useState<Set<string>>(new Set());
+  const [reservationData, setReservationData] = useState<ReservationInfo[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -73,15 +83,20 @@ export default function ReserveDialog({
     [selectedDay],
   );
 
-  const reservations = useMemo(() => {
-    const res: { slot: string; name: string }[] = [];
-    slotData.forEach((data, slot) => {
-      if (!bookingSlots.has(slot)) {
-        res.push({ slot, name: data.name });
-      }
-    });
-    return res.sort((a, b) => a.slot.localeCompare(b.slot));
-  }, [slotData, bookingSlots]);
+  function isReservationSlot(data: Partial<SlotInfo> | undefined) {
+    if (!data) return false;
+    return Boolean(data.reservedByRole || data.reservedByUid || data.reason);
+  }
+
+  const currentReservations = useMemo(
+    () =>
+      reservationData
+        .filter((r) => slotEndMs(r.date, r.slot) > nowMs)
+        .sort((a, b) =>
+          `${a.date}_${a.slot}`.localeCompare(`${b.date}_${b.slot}`),
+        ),
+    [reservationData, nowMs],
+  );
 
   // Reset on open
   useEffect(() => {
@@ -90,6 +105,7 @@ export default function ReserveDialog({
     setTitle("");
     setSelected(new Set());
     setLoadError(null);
+    setReservationData([]);
     setSelectedDay(startOfDay(new Date()));
   }, [visible]);
 
@@ -143,6 +159,35 @@ export default function ReserveDialog({
       unsubBookings();
     };
   }, [visible, date]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const reservationsQ = query(collectionGroup(db, "slots"));
+    const unsubReservations = onSnapshot(
+      reservationsQ,
+      (snap) => {
+        setLoadError(null);
+        const list: ReservationInfo[] = [];
+        snap.docs.forEach((d) => {
+          const data = d.data() as Partial<ReservationInfo & SlotInfo>;
+          if (
+            typeof data.date === "string" &&
+            typeof data.slot === "string" &&
+            typeof data.name === "string" &&
+            isReservationSlot(data)
+          ) {
+            list.push({ date: data.date, slot: data.slot, name: data.name });
+          }
+        });
+        setReservationData(list);
+      },
+      (e) => {
+        console.warn("[ReserveDialog] Failed loading reservations", e);
+        setLoadError("Could not load reservation data.");
+      },
+    );
+    return unsubReservations;
+  }, [visible]);
 
   function toggleSlot(slot: string) {
     if (isPastSlot(slot)) return;
@@ -215,10 +260,10 @@ export default function ReserveDialog({
     }
   }
 
-  async function unreserve(slot: string) {
+  async function unreserve(resDate: string, slot: string) {
     try {
       setBusy(true);
-      await deleteDoc(doc(db, "schedule", date, "slots", slot));
+      await deleteDoc(doc(db, "schedule", resDate, "slots", slot));
     } catch (e: any) {
       console.warn("[ReserveDialog] Unreserve failed", e);
       Alert.alert("Error", e?.message ?? "Failed to unreserve");
@@ -284,12 +329,13 @@ export default function ReserveDialog({
                 <Button
                   mode="contained"
                   icon="clipboard-list-outline"
-                  disabled={reservations.length === 0}
                   onPress={() => setMode("manage")}
                   contentStyle={s.menuBtnContent}
                 >
                   Current Reservations
-                  {reservations.length > 0 ? ` (${reservations.length})` : ""}
+                  {currentReservations.length > 0
+                    ? ` (${currentReservations.length})`
+                    : ""}
                 </Button>
               </View>
             ) : mode === "reserve" ? (
@@ -311,10 +357,11 @@ export default function ReserveDialog({
                   {hours.map((h) => {
                     const slot = hourSlot(h);
                     const isPast = isPastSlot(slot);
-                    const isBooked =
-                      slotData.has(slot) && bookingSlots.has(slot);
+                    const slotInfo = slotData.get(slot);
                     const isReserved =
-                      slotData.has(slot) && !bookingSlots.has(slot);
+                      isReservationSlot(slotInfo) ||
+                      (!!slotInfo && !bookingSlots.has(slot));
+                    const isBooked = !!slotInfo && !isReserved;
                     const taken = isBooked || isReserved || isPast;
                     const sel = selected.has(slot);
                     return (
@@ -363,23 +410,27 @@ export default function ReserveDialog({
             ) : (
               /* manage mode */
               <>
-                {renderDateNav()}
-
-                {reservations.length === 0 ? (
-                  <Text style={s.emptyText}>No reservations on this day.</Text>
+                {currentReservations.length === 0 ? (
+                  <Text style={s.emptyText}>No current reservations.</Text>
                 ) : (
-                  reservations.map((r) => (
-                    <Card key={r.slot} style={s.resCard} mode="outlined">
+                  currentReservations.map((r) => (
+                    <Card
+                      key={`${r.date}_${r.slot}`}
+                      style={s.resCard}
+                      mode="outlined"
+                    >
                       <Card.Title
                         title={r.name}
-                        subtitle={hourLabel(parseInt(r.slot.split(":")[0], 10))}
+                        subtitle={`${r.date} • ${hourLabel(
+                          parseInt(r.slot.split(":")[0], 10),
+                        )}`}
                       />
                       <Card.Actions>
                         <Button
                           mode="contained-tonal"
                           textColor="#D7263D"
                           disabled={busy}
-                          onPress={() => unreserve(r.slot)}
+                          onPress={() => unreserve(r.date, r.slot)}
                         >
                           Unreserve
                         </Button>

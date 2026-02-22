@@ -222,6 +222,11 @@ service cloud.firestore {
       allow delete: if isOwner();
     }
 
+    // Allow collection group reads for "slots" (used by Current Reservations).
+    match /{path=**}/slots/{slot} {
+      allow read: if isAllowed();
+    }
+
     // Schedule slots
     match /schedule/{date}/slots/{slot} {
       allow read: if isAllowed();

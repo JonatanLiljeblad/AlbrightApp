@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, StyleSheet, View } from 'react-native';
 import { Button, Card, IconButton, ProgressBar, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
-import { assertCanBookInTransaction, canBook } from '@/src/bookingRules';
+import { canBook } from '@/src/bookingRules';
 import { addDays, hourLabel, hourSlot, hoursRange, slotStartMs as slotStartMsUtil, startOfDay, toYmd } from '@/src/time';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, doc, getDocs, onSnapshot, runTransaction } from 'firebase/firestore';
@@ -123,7 +123,6 @@ export default function ScheduleScreen() {
       await runTransaction(db, async (tx) => {
         const existing = await tx.get(slotRef);
         if (existing.exists()) throw new Error('This slot is already booked.');
-        await assertCanBookInTransaction(tx, u.uid, date, slot);
 
         const payload = {
           date,

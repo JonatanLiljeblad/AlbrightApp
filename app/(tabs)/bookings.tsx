@@ -3,7 +3,6 @@ import { Alert, StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { slotEndMs } from '@/src/time';
-import { removeBookingFromGuardInTransaction } from '@/src/bookingRules';
 import type { Booking } from '@/src/types';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, doc, onSnapshot, query, runTransaction, where } from 'firebase/firestore';
@@ -71,7 +70,6 @@ export default function MyBookingsScreen() {
 
         tx.delete(bookingRef);
         tx.delete(slotRef);
-        await removeBookingFromGuardInTransaction(tx, u.uid, b.date, b.slot);
       });
     } catch (e: any) {
       console.warn('[MyBookingsScreen] Unbook failed', e);
