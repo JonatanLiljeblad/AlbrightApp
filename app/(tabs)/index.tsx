@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, StyleSheet, View } from 'react-native';
 import { Button, Card, IconButton, ProgressBar, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
-import { canBook } from '@/src/bookingRules';
+import { assertCanBookInTransaction, hydrateBookingGuardIfNeeded } from '@/src/bookingRules';
 import { addDays, hourLabel, hourSlot, hoursRange, slotStartMs as slotStartMsUtil, startOfDay, toYmd } from '@/src/time';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, doc, getDocs, onSnapshot, runTransaction } from 'firebase/firestore';
@@ -76,8 +76,13 @@ export default function ScheduleScreen() {
   }
 
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
+  const [hydratedGuardUid, setHydratedGuardUid] = useState<string | null>(null);
 
   useEffect(() => onAuthStateChanged(auth, (u) => setUid(u?.uid ?? null)), []);
+
+  useEffect(() => {
+    setHydratedGuardUid((prev) => (prev === uid ? prev : null));
+  }, [uid]);
 
   useEffect(() => {
     if (!uid) {
@@ -109,20 +114,19 @@ export default function ScheduleScreen() {
       return;
     }
 
-    const allowed = await canBook(u.uid, date);
-    if (!allowed.ok) {
-      Alert.alert('Cannot book', allowed.reason);
-      return;
-    }
-
     try {
       setBusySlot(slot);
+      if (hydratedGuardUid !== u.uid) {
+        await hydrateBookingGuardIfNeeded(u.uid);
+        setHydratedGuardUid(u.uid);
+      }
       const slotRef = doc(db, 'schedule', date, 'slots', slot);
       const bookingRef = doc(db, 'bookings', `${date}_${slot}_${u.uid}`);
 
       await runTransaction(db, async (tx) => {
         const existing = await tx.get(slotRef);
         if (existing.exists()) throw new Error('This slot is already booked.');
+        await assertCanBookInTransaction(tx, u.uid, date, slot);
 
         const payload = {
           date,

@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, query, type Transaction, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, setDoc, type Transaction, where } from 'firebase/firestore';
 import { db } from './firebase';
 import { slotEndMs } from './time';
 import type { Booking } from './types';
@@ -51,6 +51,36 @@ function normalizeActiveGuard(value: unknown, now: number): ActiveBookingGuard[]
 
 function guardRef(userId: string) {
   return doc(db, 'bookingGuards', userId);
+}
+
+export async function hydrateBookingGuardIfNeeded(userId: string, now = Date.now()) {
+  const ref = guardRef(userId);
+  const snap = await getDoc(ref);
+  const guardData = snap.data() as { active?: unknown; updatedAt?: unknown } | undefined;
+  if (snap.exists() && Array.isArray(guardData?.active) && typeof guardData.updatedAt === 'number') return;
+
+  const byUserQ = query(collection(db, 'bookings'), where('userId', '==', userId));
+  const byUser = await getDocs(byUserQ);
+  const active = byUser.docs
+    .map((d) => {
+      const data = d.data() as Partial<Booking>;
+      if (typeof data.date !== 'string' || typeof data.slot !== 'string') return null;
+      const endMs = slotEndMs(data.date, data.slot);
+      if (!Number.isFinite(endMs) || endMs <= now) return null;
+      return { id: d.id, date: data.date, slot: data.slot, endMs } satisfies ActiveBookingGuard;
+    })
+    .filter((item): item is ActiveBookingGuard => item !== null)
+    .sort((a, b) => a.endMs - b.endMs)
+    .slice(0, 2);
+
+  await setDoc(
+    ref,
+    {
+      active,
+      updatedAt: now,
+    },
+    { merge: true }
+  );
 }
 
 export async function assertCanBookInTransaction(
