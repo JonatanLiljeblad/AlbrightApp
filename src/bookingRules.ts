@@ -53,6 +53,29 @@ function guardRef(userId: string) {
   return doc(db, 'bookingGuards', userId);
 }
 
+/**
+ * One-time migration utility: initialises the `bookingGuards/{uid}` document by
+ * scanning the user's existing `bookings` collection.
+ *
+ * **Do NOT call this in the normal booking flow.** The read and write are performed
+ * outside of a transaction, so there is an inherent race window: a concurrent booking
+ * that completes between the `getDocs` read and the `setDoc` write will not be
+ * reflected in the guard, potentially allowing the booking cap to be bypassed until
+ * the guard is next updated by a transaction.
+ *
+ * For regular bookings, `assertCanBookInTransaction` initialises the guard document
+ * atomically on the first booking transaction if the guard document does not yet
+ * exist, but it does so starting from an empty list of active bookings. This
+ * *does not* rebuild the guard from any pre-existing active bookings in the
+ * `bookings` collection. If a user's guard document is missing, corrupt, or
+ * deleted, cap enforcement for that user can therefore be temporarily bypassed
+ * until their guard is hydrated again.
+ *
+ * To avoid this, run `hydrateBookingGuardIfNeeded` as a one-time (or controlled)
+ * migration to backfill `bookingGuards/{uid}` from existing `bookings` before
+ * relying on booking caps being enforced, and ensure guard documents remain
+ * present and valid in normal operation.
+ */
 export async function hydrateBookingGuardIfNeeded(userId: string, now = Date.now()) {
   const ref = guardRef(userId);
   const snap = await getDoc(ref);
