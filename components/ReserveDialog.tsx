@@ -139,7 +139,7 @@ export default function ReserveDialog({
   }, [visible, date]);
 
   useEffect(() => {
-    if (!visible || mode === "reserve") return;
+    if (!visible || mode !== "manage") return;
     const reservationsQ = query(
       collectionGroup(db, "slots"),
       where("reservedByRole", "in", ["owner", "admin"]),
@@ -314,9 +314,6 @@ export default function ReserveDialog({
                   contentStyle={s.menuBtnContent}
                 >
                   Current Reservations
-                  {currentReservations.length > 0
-                    ? ` (${currentReservations.length})`
-                    : ""}
                 </Button>
               </View>
             ) : mode === "reserve" ? (
