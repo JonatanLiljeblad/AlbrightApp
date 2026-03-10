@@ -8,7 +8,9 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "rules:smoke": "node scripts/firestore-emulator-smoke.mjs"
+    "rules:smoke": "node scripts/firestore-emulator-smoke.mjs",
+    "rules:smoke:emulators": "firebase emulators:exec --project demo-albright --only auth,firestore \"npm run rules:smoke\"",
+    "verify": "npm run typecheck && npm run rules:smoke:emulators"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

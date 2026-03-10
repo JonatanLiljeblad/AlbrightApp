@@ -1,6 +1,18 @@
 import { deleteApp, initializeApp } from 'firebase/app';
 import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth } from 'firebase/auth';
-import { collectionGroup, connectFirestoreEmulator, doc, getDocs, getFirestore, query, runTransaction, setDoc } from 'firebase/firestore';
+import {
+  collection,
+  collectionGroup,
+  connectFirestoreEmulator,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  query,
+  runTransaction,
+  setLogLevel,
+  setDoc,
+} from 'firebase/firestore';
 
 const projectId = process.env.FIREBASE_PROJECT_ID ?? 'demo-albright';
 const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8080';
@@ -15,6 +27,8 @@ const firestoreEmulatorPort = Number(firestorePortRaw ?? '8080');
 if (!firestoreEmulatorHost || !Number.isFinite(firestoreEmulatorPort)) {
   throw new Error(`Invalid FIRESTORE_EMULATOR_HOST: "${firestoreHost}"`);
 }
+
+setLogLevel('silent');
 
 function asFirestoreValue(value) {
   if (value === null) return { nullValue: null };
@@ -80,6 +94,23 @@ function createClient(name) {
   return { app, auth, db };
 }
 
+function emailDoc(email, createdBy) {
+  return {
+    email,
+    createdAt: Date.now(),
+    createdBy,
+  };
+}
+
+function accessRequestPayload({ name, email }) {
+  return {
+    name,
+    email,
+    status: 'pending',
+    createdAt: Date.now(),
+  };
+}
+
 function bookingPayload({ date, slot, uid, email, name }) {
   return {
     date,
@@ -103,6 +134,39 @@ function reservationPayload({ date, slot, uid, email, reason, role }) {
     reservedByUid: uid,
     reason,
   };
+}
+
+function guardEntry({ date, slot, uid, hoursFromNow = 1 }) {
+  return {
+    id: `${date}_${slot}_${uid}`,
+    date,
+    slot,
+    endMs: Date.now() + hoursFromNow * 60 * 60 * 1000,
+  };
+}
+
+function bookingRefs(db, date, slot, uid) {
+  return {
+    slotRef: doc(db, 'schedule', date, 'slots', slot),
+    bookingRef: doc(db, 'bookings', `${date}_${slot}_${uid}`),
+  };
+}
+
+async function createBookingPair(db, { date, slot, uid, email, name }) {
+  const { slotRef, bookingRef } = bookingRefs(db, date, slot, uid);
+  const payload = bookingPayload({ date, slot, uid, email, name });
+  await runTransaction(db, async (tx) => {
+    tx.set(slotRef, payload);
+    tx.set(bookingRef, payload);
+  });
+}
+
+async function deleteBookingPair(db, { date, slot, uid }) {
+  const { slotRef, bookingRef } = bookingRefs(db, date, slot, uid);
+  await runTransaction(db, async (tx) => {
+    tx.delete(slotRef);
+    tx.delete(bookingRef);
+  });
 }
 
 const results = [];
@@ -141,49 +205,146 @@ async function main() {
   const ownerEmail = 'owner@example.com';
   const adminEmail = 'admin@example.com';
   const userEmail = 'member@example.com';
+  const otherUserEmail = 'other@example.com';
+  const outsiderEmail = 'outsider@example.com';
+  const inviteeEmail = 'invitee@example.com';
   const password = 'password123';
   const date = '2099-01-01';
+  const nextDate = '2099-01-02';
 
   await flushFirestore();
 
   const owner = createClient('owner-client');
   const admin = createClient('admin-client');
   const user = createClient('user-client');
+  const otherUser = createClient('other-user-client');
+  const outsider = createClient('outsider-client');
+  const anon = createClient('anon-client');
 
   try {
     const ownerCred = await createUserWithEmailAndPassword(owner.auth, ownerEmail, password);
     const adminCred = await createUserWithEmailAndPassword(admin.auth, adminEmail, password);
     const userCred = await createUserWithEmailAndPassword(user.auth, userEmail, password);
+    await createUserWithEmailAndPassword(otherUser.auth, otherUserEmail, password);
+    const outsiderCred = await createUserWithEmailAndPassword(outsider.auth, outsiderEmail, password);
 
-    const now = Date.now();
-    await adminPatchDoc(`owners/${ownerEmail}`, { email: ownerEmail, createdAt: now, createdBy: ownerEmail });
-    await adminPatchDoc(`admins/${adminEmail}`, { email: adminEmail, createdAt: now, createdBy: ownerEmail });
-    await adminPatchDoc(`allowedEmails/${userEmail}`, { email: userEmail, createdAt: now, createdBy: ownerEmail });
+    await adminPatchDoc(`owners/${ownerEmail}`, emailDoc(ownerEmail, ownerEmail));
+    await adminPatchDoc(`admins/${adminEmail}`, emailDoc(adminEmail, ownerEmail));
+    await adminPatchDoc(`allowedEmails/${userEmail}`, emailDoc(userEmail, ownerEmail));
+    await adminPatchDoc(`allowedEmails/${otherUserEmail}`, emailDoc(otherUserEmail, ownerEmail));
+
+    await expectAllow('ALLOW public allowlist get by document id', async () => {
+      await getDoc(doc(anon.db, 'allowedEmails', userEmail));
+    });
+
+    await expectDeny('DENY public allowlist list', async () => {
+      await getDocs(query(collection(anon.db, 'allowedEmails')));
+    });
+
+    await expectAllow('ALLOW public access request create', async () => {
+      await setDoc(
+        doc(anon.db, 'accessRequests', outsiderEmail),
+        accessRequestPayload({ name: 'Outsider User', email: outsiderEmail })
+      );
+    });
+
+    await expectAllow('ALLOW public pending access request update', async () => {
+      await setDoc(
+        doc(anon.db, 'accessRequests', outsiderEmail),
+        accessRequestPayload({ name: 'Updated Outsider', email: outsiderEmail })
+      );
+    });
+
+    await expectAllow('ALLOW requester read own access request after sign-in', async () => {
+      await getDoc(doc(outsider.db, 'accessRequests', outsiderEmail));
+    });
+
+    await expectDeny('DENY regular user list access requests', async () => {
+      await getDocs(query(collection(user.db, 'accessRequests')));
+    });
+
+    await expectAllow('ALLOW admin list access requests', async () => {
+      await getDocs(query(collection(admin.db, 'accessRequests')));
+    });
+
+    await expectDeny('DENY admin decision update without decision metadata', async () => {
+      await setDoc(
+        doc(admin.db, 'accessRequests', outsiderEmail),
+        { status: 'approved' },
+        { merge: true }
+      );
+    });
+
+    await expectAllow('ALLOW admin decision update with decision metadata', async () => {
+      await setDoc(
+        doc(admin.db, 'accessRequests', outsiderEmail),
+        { status: 'approved', decidedAt: Date.now(), decidedBy: adminEmail },
+        { merge: true }
+      );
+    });
+
+    await expectDeny('DENY public update after request already approved', async () => {
+      await setDoc(
+        doc(anon.db, 'accessRequests', outsiderEmail),
+        accessRequestPayload({ name: 'Try Again', email: outsiderEmail })
+      );
+    });
+
+    await expectDeny('DENY regular user writing allowlist doc', async () => {
+      await setDoc(doc(user.db, 'allowedEmails', inviteeEmail), emailDoc(inviteeEmail, userEmail));
+    });
+
+    await expectAllow('ALLOW admin writing allowlist doc', async () => {
+      await setDoc(doc(admin.db, 'allowedEmails', inviteeEmail), emailDoc(inviteeEmail, adminEmail));
+    });
+
+    await expectAllow('ALLOW owner writing admin role doc', async () => {
+      await setDoc(
+        doc(owner.db, 'admins', 'newadmin@example.com'),
+        emailDoc('newadmin@example.com', ownerEmail)
+      );
+    });
+
+    await expectDeny('DENY admin writing admin role doc', async () => {
+      await setDoc(
+        doc(admin.db, 'admins', 'shadowadmin@example.com'),
+        emailDoc('shadowadmin@example.com', adminEmail)
+      );
+    });
+
+    await expectDeny('DENY admin writing owner role doc', async () => {
+      await setDoc(
+        doc(admin.db, 'owners', 'newowner@example.com'),
+        emailDoc('newowner@example.com', adminEmail)
+      );
+    });
 
     await expectAllow('ALLOW user booking transaction (slot + booking)', async () => {
-      const slot = '09:00';
-      const slotRef = doc(user.db, 'schedule', date, 'slots', slot);
-      const bookingRef = doc(user.db, 'bookings', `${date}_${slot}_${userCred.user.uid}`);
-      const payload = bookingPayload({
+      await createBookingPair(user.db, {
         date,
-        slot,
+        slot: '09:00',
         uid: userCred.user.uid,
         email: userEmail,
         name: 'Member User',
       });
-      await runTransaction(user.db, async (tx) => {
-        tx.set(slotRef, payload);
-        tx.set(bookingRef, payload);
+    });
+
+    await expectDeny('DENY outsider booking transaction without allowlist', async () => {
+      await createBookingPair(outsider.db, {
+        date,
+        slot: '10:00',
+        uid: outsiderCred.user.uid,
+        email: outsiderEmail,
+        name: 'Outsider User',
       });
     });
 
     await expectDeny('DENY user schedule-only create', async () => {
-      const slot = '10:00';
       await setDoc(
-        doc(user.db, 'schedule', date, 'slots', slot),
+        doc(user.db, 'schedule', date, 'slots', '11:00'),
         bookingPayload({
           date,
-          slot,
+          slot: '11:00',
           uid: userCred.user.uid,
           email: userEmail,
           name: 'Member User',
@@ -192,12 +353,11 @@ async function main() {
     });
 
     await expectDeny('DENY user reservation payload create', async () => {
-      const slot = '11:00';
       await setDoc(
-        doc(user.db, 'schedule', date, 'slots', slot),
+        doc(user.db, 'schedule', date, 'slots', '12:00'),
         reservationPayload({
           date,
-          slot,
+          slot: '12:00',
           uid: userCred.user.uid,
           email: userEmail,
           reason: 'Attempted reservation',
@@ -207,15 +367,42 @@ async function main() {
     });
 
     await expectAllow('ALLOW admin reservation with explicit metadata', async () => {
-      const slot = '12:00';
       await setDoc(
-        doc(admin.db, 'schedule', date, 'slots', slot),
+        doc(admin.db, 'schedule', date, 'slots', '13:00'),
         reservationPayload({
           date,
-          slot,
+          slot: '13:00',
           uid: adminCred.user.uid,
           email: adminEmail,
           reason: 'Maintenance window',
+          role: 'admin',
+        })
+      );
+    });
+
+    await expectAllow('ALLOW owner reservation with owner metadata', async () => {
+      await setDoc(
+        doc(owner.db, 'schedule', date, 'slots', '14:00'),
+        reservationPayload({
+          date,
+          slot: '14:00',
+          uid: ownerCred.user.uid,
+          email: ownerEmail,
+          reason: 'Owner hold',
+          role: 'owner',
+        })
+      );
+    });
+
+    await expectDeny('DENY owner reservation using admin role metadata', async () => {
+      await setDoc(
+        doc(owner.db, 'schedule', date, 'slots', '15:00'),
+        reservationPayload({
+          date,
+          slot: '15:00',
+          uid: ownerCred.user.uid,
+          email: ownerEmail,
+          reason: 'Wrong role metadata',
           role: 'admin',
         })
       );
@@ -226,27 +413,30 @@ async function main() {
       await getDocs(q);
     });
 
+    await expectDeny('DENY outsider collectionGroup schedule query', async () => {
+      const q = query(collectionGroup(outsider.db, 'slots'));
+      await getDocs(q);
+    });
+
     await expectDeny('DENY admin reservation missing reason', async () => {
-      const slot = '13:00';
       const payload = reservationPayload({
         date,
-        slot,
+        slot: '16:00',
         uid: adminCred.user.uid,
         email: adminEmail,
         reason: 'Temporary',
         role: 'admin',
       });
       delete payload.reason;
-      await setDoc(doc(admin.db, 'schedule', date, 'slots', slot), payload);
+      await setDoc(doc(admin.db, 'schedule', date, 'slots', '16:00'), payload);
     });
 
     await expectDeny('DENY booking-only create without matching schedule', async () => {
-      const slot = '14:00';
       await setDoc(
-        doc(user.db, 'bookings', `${date}_${slot}_${userCred.user.uid}`),
+        doc(user.db, 'bookings', `${date}_17:00_${userCred.user.uid}`),
         bookingPayload({
           date,
-          slot,
+          slot: '17:00',
           uid: userCred.user.uid,
           email: userEmail,
           name: 'Member User',
@@ -254,13 +444,79 @@ async function main() {
       );
     });
 
+    await expectAllow('ALLOW admin read another user booking doc', async () => {
+      await getDoc(doc(admin.db, 'bookings', `${date}_09:00_${userCred.user.uid}`));
+    });
+
+    await expectDeny('DENY other user read another user booking doc', async () => {
+      await getDoc(doc(otherUser.db, 'bookings', `${date}_09:00_${userCred.user.uid}`));
+    });
+
+    await expectDeny('DENY outsider read schedule slot', async () => {
+      await getDoc(doc(outsider.db, 'schedule', date, 'slots', '13:00'));
+    });
+
+    await expectAllow('ALLOW user delete own booking transaction', async () => {
+      await createBookingPair(user.db, {
+        date: nextDate,
+        slot: '09:00',
+        uid: userCred.user.uid,
+        email: userEmail,
+        name: 'Member User',
+      });
+      await deleteBookingPair(user.db, {
+        date: nextDate,
+        slot: '09:00',
+        uid: userCred.user.uid,
+      });
+    });
+
+    await expectDeny('DENY other user delete another user booking transaction', async () => {
+      await createBookingPair(user.db, {
+        date: nextDate,
+        slot: '10:00',
+        uid: userCred.user.uid,
+        email: userEmail,
+        name: 'Member User',
+      });
+      await deleteBookingPair(otherUser.db, {
+        date: nextDate,
+        slot: '10:00',
+        uid: userCred.user.uid,
+      });
+    });
+
+    await expectAllow('ALLOW admin delete another user booking transaction', async () => {
+      await createBookingPair(user.db, {
+        date: nextDate,
+        slot: '11:00',
+        uid: userCred.user.uid,
+        email: userEmail,
+        name: 'Member User',
+      });
+      await deleteBookingPair(admin.db, {
+        date: nextDate,
+        slot: '11:00',
+        uid: userCred.user.uid,
+      });
+    });
+
     await expectAllow('ALLOW user writing own booking guard (<=2)', async () => {
       await setDoc(doc(user.db, 'bookingGuards', userCred.user.uid), {
         updatedAt: Date.now(),
         active: [
-          { id: `${date}_15:00_${userCred.user.uid}`, date, slot: '15:00', endMs: Date.now() + 60 * 60 * 1000 },
+          guardEntry({ date, slot: '18:00', uid: userCred.user.uid, hoursFromNow: 1 }),
+          guardEntry({ date: nextDate, slot: '08:00', uid: userCred.user.uid, hoursFromNow: 2 }),
         ],
       });
+    });
+
+    await expectAllow('ALLOW admin read another user booking guard', async () => {
+      await getDoc(doc(admin.db, 'bookingGuards', userCred.user.uid));
+    });
+
+    await expectDeny('DENY other user read another user booking guard', async () => {
+      await getDoc(doc(otherUser.db, 'bookingGuards', userCred.user.uid));
     });
 
     await expectDeny('DENY user writing another user booking guard', async () => {
@@ -274,14 +530,21 @@ async function main() {
       await setDoc(doc(user.db, 'bookingGuards', userCred.user.uid), {
         updatedAt: Date.now(),
         active: [
-          { id: `${date}_15:00_${userCred.user.uid}`, date, slot: '15:00', endMs: Date.now() + 60 * 60 * 1000 },
-          { id: `${date}_16:00_${userCred.user.uid}`, date, slot: '16:00', endMs: Date.now() + 2 * 60 * 60 * 1000 },
-          { id: `${date}_17:00_${userCred.user.uid}`, date, slot: '17:00', endMs: Date.now() + 3 * 60 * 60 * 1000 },
+          guardEntry({ date, slot: '18:00', uid: userCred.user.uid, hoursFromNow: 1 }),
+          guardEntry({ date: nextDate, slot: '08:00', uid: userCred.user.uid, hoursFromNow: 2 }),
+          guardEntry({ date: nextDate, slot: '12:00', uid: userCred.user.uid, hoursFromNow: 3 }),
         ],
       });
     });
   } finally {
-    await Promise.all([deleteApp(owner.app), deleteApp(admin.app), deleteApp(user.app)]);
+    await Promise.all([
+      deleteApp(owner.app),
+      deleteApp(admin.app),
+      deleteApp(user.app),
+      deleteApp(otherUser.app),
+      deleteApp(outsider.app),
+      deleteApp(anon.app),
+    ]);
   }
 
   let failed = 0;

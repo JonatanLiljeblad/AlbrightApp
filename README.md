@@ -29,6 +29,15 @@ npm run ios
 npm run android
 ```
 
+## Verification
+
+```bash
+npm run typecheck
+npm run rules:smoke            # Requires Auth + Firestore emulators already running
+npm run rules:smoke:emulators  # Starts the emulators for the smoke script
+npm run verify                 # Typecheck + emulator-backed smoke checks
+```
+
 ## Firestore collections
 - `allowedEmails/{emailLower}`
 - `accessRequests/{emailLower}`
@@ -60,10 +69,17 @@ To use it, paste `firestore.rules` into Firebase Console → Firestore Database 
 MVP enforces slot exclusivity with a Firestore transaction; advanced constraints should be moved to Security Rules / Cloud Functions.
 
 ## Emulator smoke checks (rules)
-Run with Firestore + Auth emulators:
+Run with Firestore + Auth emulators already running:
 ```bash
 npm run rules:smoke
 ```
+
+Or let the Firebase CLI start the required emulators for you:
+```bash
+npm run rules:smoke:emulators
+```
+
+GitHub Actions uses `npm run verify` so local verification can match CI.
 
 Migration note:
 - Existing deployments can leave `bookingGuards` empty; they are rebuilt as users book/unbook. Existing booking docs remain source-of-truth for legacy data checks.
