@@ -112,10 +112,13 @@ service cloud.firestore {
         && e.endMs > 0;
     }
 
-    // Validate entire active list (size <= 2 enforced elsewhere)
+    // Validate entire active list (max 2 entries, checked per-index
+    // because the CEL `list.all()` macro is not supported in Firestore rules).
     function validGuardActiveList(active, uid) {
       return active is list
-        && active.all(e, validGuardEntry(e, uid));
+        && (active.size() == 0
+            || (active.size() == 1 && validGuardEntry(active[0], uid))
+            || (active.size() == 2 && validGuardEntry(active[0], uid) && validGuardEntry(active[1], uid)));
     }
 
     // Allowlist (document id = lowercased email)

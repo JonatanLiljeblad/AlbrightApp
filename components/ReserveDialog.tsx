@@ -61,7 +61,6 @@ export default function ReserveDialog({
   const [title, setTitle] = useState("");
   const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
   const [slotData, setSlotData] = useState<Map<string, SlotInfo>>(new Map());
-  const [bookingSlots, setBookingSlots] = useState<Set<string>>(new Set());
   const [reservationData, setReservationData] = useState<ReservationInfo[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -136,33 +135,15 @@ export default function ReserveDialog({
       },
     );
 
-    const bookingsQ = query(
-      collection(db, "bookings"),
-      where("date", "==", date),
-    );
-    const unsubBookings = onSnapshot(
-      bookingsQ,
-      (snap) => {
-        setLoadError(null);
-        setBookingSlots(
-          new Set(snap.docs.map((d) => (d.data() as SlotInfo).slot)),
-        );
-      },
-      (e) => {
-        console.warn("[ReserveDialog] Failed loading booking slots", e);
-        setLoadError("Could not load booking data.");
-      },
-    );
-
-    return () => {
-      unsubSlots();
-      unsubBookings();
-    };
+    return unsubSlots;
   }, [visible, date]);
 
   useEffect(() => {
-    if (!visible) return;
-    const reservationsQ = query(collectionGroup(db, "slots"));
+    if (!visible || mode !== "manage") return;
+    const reservationsQ = query(
+      collectionGroup(db, "slots"),
+      where("reservedByRole", "in", ["owner", "admin"]),
+    );
     const unsubReservations = onSnapshot(
       reservationsQ,
       (snap) => {
@@ -187,7 +168,7 @@ export default function ReserveDialog({
       },
     );
     return unsubReservations;
-  }, [visible]);
+  }, [visible, mode]);
 
   function toggleSlot(slot: string) {
     if (isPastSlot(slot)) return;
@@ -333,9 +314,6 @@ export default function ReserveDialog({
                   contentStyle={s.menuBtnContent}
                 >
                   Current Reservations
-                  {currentReservations.length > 0
-                    ? ` (${currentReservations.length})`
-                    : ""}
                 </Button>
               </View>
             ) : mode === "reserve" ? (
@@ -358,9 +336,7 @@ export default function ReserveDialog({
                     const slot = hourSlot(h);
                     const isPast = isPastSlot(slot);
                     const slotInfo = slotData.get(slot);
-                    const isReserved =
-                      isReservationSlot(slotInfo) ||
-                      (!!slotInfo && !bookingSlots.has(slot));
+                    const isReserved = isReservationSlot(slotInfo);
                     const isBooked = !!slotInfo && !isReserved;
                     const taken = isBooked || isReserved || isPast;
                     const sel = selected.has(slot);

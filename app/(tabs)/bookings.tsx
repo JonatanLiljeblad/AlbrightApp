@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
+import { removeBookingFromGuardInTransaction } from '@/src/bookingRules';
 import { auth, db } from '@/src/firebase';
 import { slotEndMs } from '@/src/time';
 import type { Booking } from '@/src/types';
@@ -68,6 +69,7 @@ export default function MyBookingsScreen() {
           }
         }
 
+        await removeBookingFromGuardInTransaction(tx, u.uid, b.date, b.slot);
         tx.delete(bookingRef);
         tx.delete(slotRef);
       });

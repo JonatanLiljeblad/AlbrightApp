@@ -1,6 +1,6 @@
 import HistoryDialog from "@/components/HistoryDialog";
 import ReserveDialog from "@/components/ReserveDialog";
-import { isAdmin as isAdminEnv, isOwner as isOwnerEnv } from "@/src/auth";
+import { useAdminAccess } from "@/src/adminAccessContext";
 import { auth, db } from "@/src/firebase";
 import type { AccessRequest } from "@/src/types";
 import {
@@ -8,11 +8,9 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
-  query,
   setDoc,
-  where,
 } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Dimensions,
@@ -37,12 +35,9 @@ function normalizeEmail(email: string) {
 }
 
 export default function AdminScreen() {
-  const me = (auth.currentUser?.email ?? "").trim().toLowerCase();
+  const { owner, canAdmin, pendingRequests } = useAdminAccess();
 
   const [busy, setBusy] = useState(false);
-  const [requests, setRequests] = useState<AccessRequest[]>([]);
-  const [ownerDoc, setOwnerDoc] = useState(false);
-  const [adminDoc, setAdminDoc] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [permOpen, setPermOpen] = useState(false);
@@ -53,73 +48,7 @@ export default function AdminScreen() {
   const [admins, setAdmins] = useState<RoleDoc[]>([]);
   const [newOwner, setNewOwner] = useState("");
   const [newAdmin, setNewAdmin] = useState("");
-
-  useEffect(() => {
-    if (!me) {
-      setOwnerDoc(false);
-      setAdminDoc(false);
-      setLoadError(null);
-      return;
-    }
-    const unsubOwner = onSnapshot(
-      doc(db, "owners", me),
-      (s) => {
-        setLoadError(null);
-        setOwnerDoc(s.exists());
-      },
-      (e) => {
-        console.warn("[AdminScreen] Failed owner role lookup", e);
-        setOwnerDoc(false);
-        setLoadError("Could not verify admin access right now.");
-      },
-    );
-    const unsubAdmin = onSnapshot(
-      doc(db, "admins", me),
-      (s) => {
-        setLoadError(null);
-        setAdminDoc(s.exists());
-      },
-      (e) => {
-        console.warn("[AdminScreen] Failed admin role lookup", e);
-        setAdminDoc(false);
-        setLoadError("Could not verify admin access right now.");
-      },
-    );
-    return () => {
-      unsubOwner();
-      unsubAdmin();
-    };
-  }, [me]);
-
-  const owner = useMemo(() => ownerDoc || isOwnerEnv(me), [ownerDoc, me]);
-  const canAdmin = useMemo(
-    () => owner || adminDoc || isAdminEnv(me),
-    [owner, adminDoc, me],
-  );
-
-  useEffect(() => {
-    if (!canAdmin) {
-      setRequests([]);
-      setLoadError(null);
-      return;
-    }
-    const q = query(
-      collection(db, "accessRequests"),
-      where("status", "==", "pending"),
-    );
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setLoadError(null);
-        setRequests(snap.docs.map((d) => d.data() as AccessRequest));
-      },
-      (e) => {
-        console.warn("[AdminScreen] Failed loading access requests", e);
-        setLoadError("Could not load access requests.");
-      },
-    );
-    return unsub;
-  }, [canAdmin]);
+  const requests: AccessRequest[] = pendingRequests;
 
   useEffect(() => {
     if (!owner) {

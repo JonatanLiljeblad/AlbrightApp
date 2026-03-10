@@ -39,7 +39,7 @@ npm run android
 - `bookingGuards/{uid}` (internal active-booking guard state for cap enforcement)
 
 ## Firestore Security Rules (recommended)
-This repo includes a starter `firestore.rules` that enforces:
+This repo includes Firebase CLI config for `firestore.rules` and `firestore.indexes.json`, and the rules enforce:
 - allowlist gating (`allowedEmails/{emailLower}`)
 - role management (`owners/{emailLower}`, `admins/{emailLower}`)
 - booking integrity (only allowed users can create bookings; slot exclusivity enforced by the app transaction)
@@ -54,7 +54,7 @@ Owners/admins are treated as allowed users automatically; you can still add `all
 ### Privacy note
 `allowedEmails` is readable by document ID to support pre-auth signup gating, which means someone could *guess* emails and probe existence (no list/query). If that’s a concern, move allowlist checks behind a Callable Cloud Function.
 
-To use it, paste `firestore.rules` into Firebase Console → Firestore Database → Rules (or integrate via Firebase CLI).
+To use it, paste `firestore.rules` into Firebase Console → Firestore Database → Rules, and create the indexes from `firestore.indexes.json` in Firestore → Indexes (or deploy both together with Firebase CLI via `firebase deploy --only firestore`).
 
 ## Notes
 MVP enforces slot exclusivity with a Firestore transaction; advanced constraints should be moved to Security Rules / Cloud Functions.
