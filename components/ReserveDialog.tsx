@@ -1,5 +1,17 @@
 import { auth, db } from "@/src/firebase";
 import {
+  detectScheduleBackend,
+  isReservationSlot,
+  loadScheduleDay,
+  loadScheduleReservations,
+  normalizeScheduleDay,
+  removeScheduleSlot,
+  scheduleDayRef,
+  scheduleSlotRef,
+  subscribeToScheduleDay,
+  upsertScheduleSlot,
+} from "@/src/schedule";
+import {
   addDays,
   hourLabel,
   hourSlot,
@@ -9,14 +21,8 @@ import {
   toYmd,
 } from "@/src/time";
 import {
-  collection,
-  collectionGroup,
   deleteDoc,
-  doc,
-  onSnapshot,
-  query,
   runTransaction,
-  where,
 } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -36,15 +42,9 @@ import {
   Text,
   TextInput,
 } from "react-native-paper";
+import type { ReservedByRole, ScheduleSlot } from "@/src/types";
 
-type SlotInfo = {
-  slot: string;
-  name: string;
-  userId: string;
-  reservedByRole?: "owner" | "admin";
-  reservedByUid?: string;
-  reason?: string;
-};
+type SlotInfo = ScheduleSlot;
 type ReservationInfo = { date: string; slot: string; name: string };
 type Mode = "menu" | "reserve" | "manage";
 
@@ -55,7 +55,7 @@ export default function ReserveDialog({
 }: {
   visible: boolean;
   onDismiss: () => void;
-  reservedByRole: "owner" | "admin";
+  reservedByRole: ReservedByRole;
 }) {
   const [mode, setMode] = useState<Mode>("menu");
   const [title, setTitle] = useState("");
@@ -82,11 +82,6 @@ export default function ReserveDialog({
     [selectedDay],
   );
 
-  function isReservationSlot(data: Partial<SlotInfo> | undefined) {
-    if (!data) return false;
-    return Boolean(data.reservedByRole || data.reservedByUid || data.reason);
-  }
-
   const currentReservations = useMemo(
     () =>
       reservationData
@@ -104,6 +99,7 @@ export default function ReserveDialog({
     setTitle("");
     setSelected(new Set());
     setLoadError(null);
+    setSlotData(new Map());
     setReservationData([]);
     setSelectedDay(startOfDay(new Date()));
   }, [visible]);
@@ -119,56 +115,56 @@ export default function ReserveDialog({
   useEffect(() => {
     if (!visible) return;
     setSelected(new Set());
+    let active = true;
+    let unsub: (() => void) | undefined;
 
-    const slotsRef = collection(db, "schedule", date, "slots");
-    const unsubSlots = onSnapshot(
-      slotsRef,
-      (snap) => {
+    void subscribeToScheduleDay(
+      date,
+      (day) => {
+        if (!active) return;
         setLoadError(null);
-        const map = new Map<string, SlotInfo>();
-        snap.docs.forEach((d) => map.set(d.id, d.data() as SlotInfo));
-        setSlotData(map);
+        setSlotData(new Map<string, SlotInfo>(Object.entries(day.slots)));
       },
       (e) => {
+        if (!active) return;
         console.warn("[ReserveDialog] Failed loading schedule slots", e);
         setLoadError("Could not load schedule data.");
       },
-    );
+    )
+      .then((nextUnsub) => {
+        if (active) {
+          unsub = nextUnsub;
+          return;
+        }
+        nextUnsub();
+      })
+      .catch((e) => {
+        if (!active) return;
+        console.warn("[ReserveDialog] Failed loading schedule slots", e);
+        setLoadError("Could not load schedule data.");
+      });
 
-    return unsubSlots;
+    return () => {
+      active = false;
+      unsub?.();
+    };
   }, [visible, date]);
 
   useEffect(() => {
     if (!visible || mode !== "manage") return;
-    const reservationsQ = query(
-      collectionGroup(db, "slots"),
-      where("reservedByRole", "in", ["owner", "admin"]),
-    );
-    const unsubReservations = onSnapshot(
-      reservationsQ,
-      (snap) => {
+
+    async function loadReservations() {
+      try {
         setLoadError(null);
-        const list: ReservationInfo[] = [];
-        snap.docs.forEach((d) => {
-          const data = d.data() as Partial<ReservationInfo & SlotInfo>;
-          if (
-            typeof data.date === "string" &&
-            typeof data.slot === "string" &&
-            typeof data.name === "string" &&
-            isReservationSlot(data)
-          ) {
-            list.push({ date: data.date, slot: data.slot, name: data.name });
-          }
-        });
-        setReservationData(list);
-      },
-      (e) => {
+        setReservationData(await loadScheduleReservations(todayYmd));
+      } catch (e) {
         console.warn("[ReserveDialog] Failed loading reservations", e);
         setLoadError("Could not load reservation data.");
-      },
-    );
-    return unsubReservations;
-  }, [visible, mode]);
+      }
+    }
+
+    void loadReservations();
+  }, [visible, mode, todayYmd]);
 
   function toggleSlot(slot: string) {
     if (isPastSlot(slot)) return;
@@ -194,42 +190,77 @@ export default function ReserveDialog({
     try {
       setBusy(true);
       const slots = Array.from(selected).sort();
+      const backend = await detectScheduleBackend(date);
+      const reason = title.trim();
       const passed = slots.filter((slot) => isPastSlot(slot, Date.now()));
       if (passed.length > 0) {
         throw new Error(`Slot(s) ${passed.join(", ")} have already passed.`);
       }
 
-      await runTransaction(db, async (tx) => {
-        const reads = await Promise.all(
-          slots.map(async (slot) => {
-            const slotRef = doc(db, "schedule", date, "slots", slot);
-            const snap = await tx.get(slotRef);
-            return { slot, exists: snap.exists(), slotRef };
-          }),
-        );
-
-        const taken = reads.filter((r) => r.exists);
-        if (taken.length > 0) {
-          throw new Error(
-            `Slot(s) ${taken.map((t) => t.slot).join(", ")} already taken.`,
+      const createdAt = Date.now();
+      if (backend === "legacy-slot-subcollection") {
+        await runTransaction(db, async (tx) => {
+          const reads = await Promise.all(
+            slots.map(async (slot) => {
+              const slotRef = scheduleSlotRef(date, slot);
+              const snap = await tx.get(slotRef);
+              return { slot, exists: snap.exists(), slotRef };
+            }),
           );
+
+          const taken = reads.filter((entry) => entry.exists);
+          if (taken.length > 0) {
+            throw new Error(
+              `Slot(s) ${taken.map((entry) => entry.slot).join(", ")} already taken.`,
+            );
+          }
+
+          for (const { slot, slotRef } of reads) {
+            tx.set(slotRef, {
+              date,
+              slot,
+              userId: u.uid,
+              name: reason,
+              email: u.email || "",
+              createdAt,
+              reservedByRole,
+              reservedByUid: u.uid,
+              reason,
+            });
+          }
+        });
+      } else {
+        const dayRef = scheduleDayRef(date);
+        const day = await loadScheduleDay(date);
+        const taken = slots.filter((slot) => day.slots[slot]);
+        if (taken.length > 0) {
+          throw new Error(`Slot(s) ${taken.join(", ")} already taken.`);
         }
 
-        for (const { slot, slotRef } of reads) {
-          const reason = title.trim();
-          tx.set(slotRef, {
-            date,
-            slot,
-            userId: u.uid,
-            name: reason,
-            email: u.email || "",
-            createdAt: Date.now(),
-            reservedByRole,
-            reservedByUid: u.uid,
-            reason,
+        for (const slot of slots) {
+          await runTransaction(db, async (tx) => {
+            const currentSnap = await tx.get(dayRef);
+            const currentDay = normalizeScheduleDay(currentSnap.data());
+            if (currentDay.slots[slot]) {
+              throw new Error(`Slot ${slot} was taken while reserving.`);
+            }
+
+            tx.set(dayRef, {
+              slots: upsertScheduleSlot(currentDay.slots, slot, {
+                date,
+                slot,
+                userId: u.uid,
+                name: reason,
+                email: u.email || "",
+                createdAt,
+                reservedByRole,
+                reservedByUid: u.uid,
+                reason,
+              }),
+            });
           });
         }
-      });
+      }
 
       setSelected(new Set());
       setTitle("");
@@ -244,7 +275,24 @@ export default function ReserveDialog({
   async function unreserve(resDate: string, slot: string) {
     try {
       setBusy(true);
-      await deleteDoc(doc(db, "schedule", resDate, "slots", slot));
+      const backend = await detectScheduleBackend(resDate);
+      if (backend === "legacy-slot-subcollection") {
+        await deleteDoc(scheduleSlotRef(resDate, slot));
+      } else {
+        await runTransaction(db, async (tx) => {
+          const dayRef = scheduleDayRef(resDate);
+          const daySnap = await tx.get(dayRef);
+          if (!daySnap.exists()) return;
+
+          const day = normalizeScheduleDay(daySnap.data());
+          if (!day.slots[slot]) return;
+
+          tx.set(dayRef, { slots: removeScheduleSlot(day.slots, slot) });
+        });
+      }
+      setReservationData((prev) =>
+        prev.filter((item) => !(item.date === resDate && item.slot === slot)),
+      );
     } catch (e: any) {
       console.warn("[ReserveDialog] Unreserve failed", e);
       Alert.alert("Error", e?.message ?? "Failed to unreserve");

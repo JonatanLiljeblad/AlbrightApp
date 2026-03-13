@@ -21,3 +21,22 @@ export type Booking = {
   email: string;
   createdAt: number;
 };
+
+export type ReservedByRole = 'owner' | 'admin';
+
+export type ScheduleSlot = Booking & {
+  reservedByRole?: ReservedByRole;
+  reservedByUid?: string;
+  reason?: string;
+};
+
+export type ScheduleDay = {
+  slots: Record<string, ScheduleSlot>;
+};
+
+export type ActiveBookingGuard = {
+  id: string;
+  date: string;
+  slot: string;
+  endMs: number;
+};

@@ -1,5 +1,6 @@
 import HistoryDialog from "@/components/HistoryDialog";
 import ReserveDialog from "@/components/ReserveDialog";
+import { useIsFocused } from "@react-navigation/native";
 import { useAdminAccess } from "@/src/adminAccessContext";
 import { auth, db } from "@/src/firebase";
 import type { AccessRequest } from "@/src/types";
@@ -7,10 +8,10 @@ import {
   collection,
   deleteDoc,
   doc,
-  onSnapshot,
+  getDocs,
   setDoc,
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Dimensions,
@@ -35,10 +36,11 @@ function normalizeEmail(email: string) {
 }
 
 export default function AdminScreen() {
-  const { owner, canAdmin, pendingRequests } = useAdminAccess();
+  const { owner, canAdmin, pendingRequests, refreshPendingRequests } = useAdminAccess();
 
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const isFocused = useIsFocused();
 
   const [permOpen, setPermOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
@@ -50,49 +52,44 @@ export default function AdminScreen() {
   const [newAdmin, setNewAdmin] = useState("");
   const requests: AccessRequest[] = pendingRequests;
 
-  useEffect(() => {
+  const refreshRoles = useCallback(async () => {
     if (!owner) {
       setOwners([]);
       setAdmins([]);
       return;
     }
 
-    const unsubOwners = onSnapshot(
-      collection(db, "owners"),
-      (snap) => {
-        setLoadError(null);
-        setOwners(
-          snap.docs
-            .map((d) => d.data() as RoleDoc)
-            .sort((a, b) => a.email.localeCompare(b.email)),
-        );
-      },
-      (e) => {
-        console.warn("[AdminScreen] Failed loading owners", e);
-        setLoadError("Could not load role assignments.");
-      },
-    );
-    const unsubAdmins = onSnapshot(
-      collection(db, "admins"),
-      (snap) => {
-        setLoadError(null);
-        setAdmins(
-          snap.docs
-            .map((d) => d.data() as RoleDoc)
-            .sort((a, b) => a.email.localeCompare(b.email)),
-        );
-      },
-      (e) => {
-        console.warn("[AdminScreen] Failed loading admins", e);
-        setLoadError("Could not load role assignments.");
-      },
-    );
-
-    return () => {
-      unsubOwners();
-      unsubAdmins();
-    };
+    try {
+      setLoadError(null);
+      const [ownersSnap, adminsSnap] = await Promise.all([
+        getDocs(collection(db, "owners")),
+        getDocs(collection(db, "admins")),
+      ]);
+      setOwners(
+        ownersSnap.docs
+          .map((d) => d.data() as RoleDoc)
+          .sort((a, b) => a.email.localeCompare(b.email)),
+      );
+      setAdmins(
+        adminsSnap.docs
+          .map((d) => d.data() as RoleDoc)
+          .sort((a, b) => a.email.localeCompare(b.email)),
+      );
+    } catch (e) {
+      console.warn("[AdminScreen] Failed loading role assignments", e);
+      setLoadError("Could not load role assignments.");
+    }
   }, [owner]);
+
+  useEffect(() => {
+    if (!isFocused) return;
+    void refreshRoles();
+  }, [isFocused, refreshRoles]);
+
+  useEffect(() => {
+    if (!canAdmin || !isFocused) return;
+    void refreshPendingRequests();
+  }, [canAdmin, isFocused, refreshPendingRequests]);
 
   async function addRole(role: "owners" | "admins", email: string) {
     const by = auth.currentUser?.email ?? "";
@@ -121,6 +118,7 @@ export default function AdminScreen() {
               } satisfies RoleDoc,
               { merge: true },
             );
+            await refreshRoles();
           } catch (e: any) {
             console.warn("[AdminScreen] Failed adding role", e);
             Alert.alert("Error", e?.message ?? "Failed");
@@ -153,6 +151,7 @@ export default function AdminScreen() {
           try {
             setBusy(true);
             await deleteDoc(doc(db, role, key));
+            await refreshRoles();
           } catch (e: any) {
             console.warn("[AdminScreen] Failed removing role", e);
             Alert.alert("Error", e?.message ?? "Failed");
@@ -192,6 +191,7 @@ export default function AdminScreen() {
           { merge: true },
         );
       }
+      await refreshPendingRequests();
     } catch (e: any) {
       console.warn("[AdminScreen] Failed deciding request", e);
       Alert.alert("Error", e?.message ?? "Failed");

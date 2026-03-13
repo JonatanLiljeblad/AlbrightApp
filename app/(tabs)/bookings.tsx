@@ -1,29 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import { Alert, StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
-import { removeBookingFromGuardInTransaction } from '@/src/bookingRules';
+import { hydrateBookingGuardIfNeeded, normalizeActiveGuard, removeBookingFromGuardInTransaction } from '@/src/bookingRules';
 import { auth, db } from '@/src/firebase';
-import { slotEndMs } from '@/src/time';
-import type { Booking } from '@/src/types';
+import {
+  detectScheduleBackend,
+  normalizeScheduleDay,
+  removeScheduleSlot,
+  scheduleDayRef,
+  scheduleSlotRef,
+} from '@/src/schedule';
+import type { ActiveBookingGuard } from '@/src/types';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, onSnapshot, query, runTransaction, where } from 'firebase/firestore';
+import { doc, onSnapshot, runTransaction } from 'firebase/firestore';
 
 export default function MyBookingsScreen() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookings, setBookings] = useState<ActiveBookingGuard[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  function activeBookings(docs: Array<{ data: Booking }>) {
-    const now = Date.now();
-    const active = docs
-      .map((d) => d.data)
-      .filter((b) => {
-        const endMs = slotEndMs(b.date, b.slot);
-        return Number.isFinite(endMs) && endMs > now;
-      });
-    active.sort((a, b) => `${a.date}_${a.slot}`.localeCompare(`${b.date}_${b.slot}`));
-    return active;
-  }
+  const isFocused = useIsFocused();
+  const hydratedGuardUids = useRef<Set<string>>(new Set());
 
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
 
@@ -31,47 +28,85 @@ export default function MyBookingsScreen() {
 
   useEffect(() => {
     if (!uid) {
+      setBookings([]);
       setLoadError(null);
       return;
     }
-    const q = query(collection(db, 'bookings'), where('userId', '==', uid));
+    if (!isFocused) return;
+
+    if (!hydratedGuardUids.current.has(uid)) {
+      hydratedGuardUids.current.add(uid);
+      void hydrateBookingGuardIfNeeded(uid).catch((e) => {
+        console.warn('[MyBookingsScreen] Guard hydration failed', e);
+        setLoadError('Could not load your bookings right now.');
+      });
+    }
+
+    const guardRef = doc(db, 'bookingGuards', uid);
     const unsub = onSnapshot(
-      q,
+      guardRef,
       (snap) => {
         setLoadError(null);
-        setBookings(activeBookings(snap.docs.map((d) => ({ data: d.data() as Booking }))));
+        setBookings(
+          normalizeActiveGuard((snap.data() as { active?: unknown } | undefined)?.active, Date.now()).sort((a, b) =>
+            `${a.date}_${a.slot}`.localeCompare(`${b.date}_${b.slot}`)
+          )
+        );
       },
       (e) => {
-        console.warn('[MyBookingsScreen] Live bookings subscription failed', e);
+        console.warn('[MyBookingsScreen] Live booking guard subscription failed', e);
         setLoadError('Could not load your bookings right now.');
       }
     );
     return unsub;
-  }, [uid]);
+  }, [uid, isFocused]);
 
-  async function unbook(b: Booking) {
+  async function unbook(b: ActiveBookingGuard) {
     const u = auth.currentUser;
     if (!u) return;
 
-    const key = `${b.date}_${b.slot}`;
+    const key = b.id;
 
     try {
       setBusyKey(key);
-      const slotRef = doc(db, 'schedule', b.date, 'slots', b.slot);
-      const bookingRef = doc(db, 'bookings', `${b.date}_${b.slot}_${u.uid}`);
+      const backend = await detectScheduleBackend(b.date);
+      const bookingRef = doc(db, 'bookings', b.id);
 
       await runTransaction(db, async (tx) => {
-        const slotSnap = await tx.get(slotRef);
-        if (slotSnap.exists()) {
-          const data = slotSnap.data() as { userId?: string };
-          if (data.userId && data.userId !== u.uid) {
+        if (backend === 'legacy-slot-subcollection') {
+          const slotRef = scheduleSlotRef(b.date, b.slot);
+          const slotSnap = await tx.get(slotRef);
+          const slotData = slotSnap.data() as { userId?: unknown } | undefined;
+          if (typeof slotData?.userId === 'string' && slotData.userId !== u.uid) {
             throw new Error('You can only unbook your own slot.');
+          }
+          await removeBookingFromGuardInTransaction(tx, u.uid, b.date, b.slot);
+          if (slotSnap.exists()) {
+            tx.delete(slotRef);
+          }
+        } else {
+          const dayRef = scheduleDayRef(b.date);
+          const daySnap = await tx.get(dayRef);
+          let nextSlots: ReturnType<typeof removeScheduleSlot> | null = null;
+          let shouldUpdateDay = false;
+          if (daySnap.exists()) {
+            const day = normalizeScheduleDay(daySnap.data());
+            const data = day.slots[b.slot];
+            if (data?.userId && data.userId !== u.uid) {
+              throw new Error('You can only unbook your own slot.');
+            }
+            nextSlots = removeScheduleSlot(day.slots, b.slot);
+            shouldUpdateDay = nextSlots !== day.slots;
+          }
+
+          await removeBookingFromGuardInTransaction(tx, u.uid, b.date, b.slot);
+
+          if (daySnap.exists() && nextSlots && shouldUpdateDay) {
+            tx.set(dayRef, { slots: nextSlots });
           }
         }
 
-        await removeBookingFromGuardInTransaction(tx, u.uid, b.date, b.slot);
         tx.delete(bookingRef);
-        tx.delete(slotRef);
       });
     } catch (e: any) {
       console.warn('[MyBookingsScreen] Unbook failed', e);
@@ -90,11 +125,11 @@ export default function MyBookingsScreen() {
           <Text>You have no active bookings.</Text>
         ) : (
           bookings.map((b) => {
-            const key = `${b.date}_${b.slot}`;
+            const key = b.id;
             const busy = busyKey === key;
             return (
               <Card key={key} style={styles.item} mode="outlined">
-                <Card.Title title={`${b.date} — ${b.slot}`} subtitle={`Booked as ${b.name}`} />
+                <Card.Title title={`${b.date} — ${b.slot}`} subtitle="Active booking" />
                 <Card.Actions>
                   <Button mode="contained" onPress={() => unbook(b)} loading={busy} disabled={busy}>
                     Unbook

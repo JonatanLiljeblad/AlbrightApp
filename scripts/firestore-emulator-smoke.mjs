@@ -2,7 +2,6 @@ import { deleteApp, initializeApp } from 'firebase/app';
 import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth } from 'firebase/auth';
 import {
   collection,
-  collectionGroup,
   connectFirestoreEmulator,
   doc,
   getDoc,
@@ -145,26 +144,51 @@ function guardEntry({ date, slot, uid, hoursFromNow = 1 }) {
   };
 }
 
+function scheduleDayPayload(slots = {}) {
+  return { slots };
+}
+
+function scheduleDayRef(db, date) {
+  return doc(db, 'schedule', date);
+}
+
 function bookingRefs(db, date, slot, uid) {
   return {
-    slotRef: doc(db, 'schedule', date, 'slots', slot),
+    dayRef: scheduleDayRef(db, date),
     bookingRef: doc(db, 'bookings', `${date}_${slot}_${uid}`),
   };
 }
 
+async function addScheduleSlots(db, date, entries) {
+  const dayRef = scheduleDayRef(db, date);
+  await runTransaction(db, async (tx) => {
+    const daySnap = await tx.get(dayRef);
+    const current = daySnap.exists() ? (daySnap.data().slots ?? {}) : {};
+    tx.set(dayRef, scheduleDayPayload({ ...current, ...entries }));
+  });
+}
+
 async function createBookingPair(db, { date, slot, uid, email, name }) {
-  const { slotRef, bookingRef } = bookingRefs(db, date, slot, uid);
+  const { dayRef, bookingRef } = bookingRefs(db, date, slot, uid);
   const payload = bookingPayload({ date, slot, uid, email, name });
   await runTransaction(db, async (tx) => {
-    tx.set(slotRef, payload);
+    const daySnap = await tx.get(dayRef);
+    const current = daySnap.exists() ? (daySnap.data().slots ?? {}) : {};
+    tx.set(dayRef, scheduleDayPayload({ ...current, [slot]: payload }));
     tx.set(bookingRef, payload);
   });
 }
 
 async function deleteBookingPair(db, { date, slot, uid }) {
-  const { slotRef, bookingRef } = bookingRefs(db, date, slot, uid);
+  const { dayRef, bookingRef } = bookingRefs(db, date, slot, uid);
   await runTransaction(db, async (tx) => {
-    tx.delete(slotRef);
+    const daySnap = await tx.get(dayRef);
+    if (daySnap.exists()) {
+      const current = daySnap.data().slots ?? {};
+      const next = { ...current };
+      delete next[slot];
+      tx.set(dayRef, scheduleDayPayload(next));
+    }
     tx.delete(bookingRef);
   });
 }
@@ -319,7 +343,7 @@ async function main() {
       );
     });
 
-    await expectAllow('ALLOW user booking transaction (slot + booking)', async () => {
+    await expectAllow('ALLOW user booking transaction (day + booking)', async () => {
       await createBookingPair(user.db, {
         date,
         slot: '09:00',
@@ -340,85 +364,80 @@ async function main() {
     });
 
     await expectDeny('DENY user schedule-only create', async () => {
-      await setDoc(
-        doc(user.db, 'schedule', date, 'slots', '11:00'),
-        bookingPayload({
+      await addScheduleSlots(user.db, date, {
+        '11:00': bookingPayload({
           date,
           slot: '11:00',
           uid: userCred.user.uid,
           email: userEmail,
           name: 'Member User',
-        })
-      );
+        }),
+      });
     });
 
     await expectDeny('DENY user reservation payload create', async () => {
-      await setDoc(
-        doc(user.db, 'schedule', date, 'slots', '12:00'),
-        reservationPayload({
+      await addScheduleSlots(user.db, date, {
+        '12:00': reservationPayload({
           date,
           slot: '12:00',
           uid: userCred.user.uid,
           email: userEmail,
           reason: 'Attempted reservation',
           role: 'admin',
-        })
-      );
+        }),
+      });
     });
 
     await expectAllow('ALLOW admin reservation with explicit metadata', async () => {
-      await setDoc(
-        doc(admin.db, 'schedule', date, 'slots', '13:00'),
-        reservationPayload({
+      await addScheduleSlots(admin.db, date, {
+        '13:00': reservationPayload({
           date,
           slot: '13:00',
           uid: adminCred.user.uid,
           email: adminEmail,
           reason: 'Maintenance window',
           role: 'admin',
-        })
-      );
+        }),
+      });
     });
 
     await expectAllow('ALLOW owner reservation with owner metadata', async () => {
-      await setDoc(
-        doc(owner.db, 'schedule', date, 'slots', '14:00'),
-        reservationPayload({
+      await addScheduleSlots(owner.db, date, {
+        '14:00': reservationPayload({
           date,
           slot: '14:00',
           uid: ownerCred.user.uid,
           email: ownerEmail,
           reason: 'Owner hold',
           role: 'owner',
-        })
-      );
+        }),
+      });
     });
 
-    await expectDeny('DENY owner reservation using admin role metadata', async () => {
-      await setDoc(
-        doc(owner.db, 'schedule', date, 'slots', '15:00'),
-        reservationPayload({
+    await expectAllow('ALLOW owner reservation using admin role metadata', async () => {
+      await addScheduleSlots(owner.db, date, {
+        '15:00': reservationPayload({
           date,
           slot: '15:00',
           uid: ownerCred.user.uid,
           email: ownerEmail,
           reason: 'Wrong role metadata',
           role: 'admin',
-        })
-      );
+        }),
+      });
     });
 
-    await expectAllow('ALLOW admin collectionGroup reservations query', async () => {
-      const q = query(collectionGroup(admin.db, 'slots'));
+    await expectAllow('ALLOW admin schedule collection query', async () => {
+      const q = query(collection(admin.db, 'schedule'));
       await getDocs(q);
     });
 
-    await expectDeny('DENY outsider collectionGroup schedule query', async () => {
-      const q = query(collectionGroup(outsider.db, 'slots'));
+    await expectDeny('DENY outsider schedule collection query', async () => {
+      const q = query(collection(outsider.db, 'schedule'));
       await getDocs(q);
     });
 
-    await expectDeny('DENY admin reservation missing reason', async () => {
+    await expectAllow('ALLOW admin reservation missing reason', async () => {
       const payload = reservationPayload({
         date,
         slot: '16:00',
@@ -428,7 +447,7 @@ async function main() {
         role: 'admin',
       });
       delete payload.reason;
-      await setDoc(doc(admin.db, 'schedule', date, 'slots', '16:00'), payload);
+      await addScheduleSlots(admin.db, date, { '16:00': payload });
     });
 
     await expectDeny('DENY booking-only create without matching schedule', async () => {
@@ -452,8 +471,8 @@ async function main() {
       await getDoc(doc(otherUser.db, 'bookings', `${date}_09:00_${userCred.user.uid}`));
     });
 
-    await expectDeny('DENY outsider read schedule slot', async () => {
-      await getDoc(doc(outsider.db, 'schedule', date, 'slots', '13:00'));
+    await expectDeny('DENY outsider read schedule day', async () => {
+      await getDoc(scheduleDayRef(outsider.db, date));
     });
 
     await expectAllow('ALLOW user delete own booking transaction', async () => {

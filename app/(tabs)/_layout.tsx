@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Tabs } from 'expo-router';
 
@@ -7,7 +7,7 @@ import { isAdmin, isOwner, watchAuth } from '@/src/auth';
 import { AdminAccessProvider } from '@/src/adminAccessContext';
 import { auth, db } from '@/src/firebase';
 import type { AccessRequest } from '@/src/types';
-import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
@@ -49,22 +49,28 @@ export default function TabLayout() {
 
   const [pendingRequests, setPendingRequests] = useState<AccessRequest[]>([]);
 
-  useEffect(() => {
+  const refreshPendingRequests = useCallback(async () => {
     if (!admin) {
       setPendingRequests([]);
       return;
     }
-    const q = query(collection(db, 'accessRequests'), where('status', '==', 'pending'));
-    const unsub = onSnapshot(
-      q,
-      (snap) => setPendingRequests(snap.docs.map((d) => d.data() as AccessRequest)),
-      () => setPendingRequests([])
-    );
-    return unsub;
+
+    try {
+      const q = query(collection(db, 'accessRequests'), where('status', '==', 'pending'));
+      const snap = await getDocs(q);
+      setPendingRequests(snap.docs.map((d) => d.data() as AccessRequest));
+    } catch (e) {
+      console.warn('[TabLayout] Failed loading pending requests', e);
+      setPendingRequests([]);
+    }
   }, [admin]);
 
+  useEffect(() => {
+    void refreshPendingRequests();
+  }, [refreshPendingRequests]);
+
   return (
-    <AdminAccessProvider value={{ email, owner, canAdmin: admin, pendingRequests }}>
+    <AdminAccessProvider value={{ email, owner, canAdmin: admin, pendingRequests, refreshPendingRequests }}>
       <Tabs
         screenOptions={{
           tabBarActiveTintColor: '#D7263D',

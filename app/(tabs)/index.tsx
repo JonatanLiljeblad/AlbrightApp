@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import { Alert, FlatList, StyleSheet, View } from 'react-native';
 import { Button, Card, IconButton, ProgressBar, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
 import { assertCanBookInTransaction } from '@/src/bookingRules';
+import {
+  detectScheduleBackend,
+  loadScheduleDay,
+  normalizeScheduleDay,
+  scheduleDayRef,
+  scheduleSlotRef,
+  subscribeToScheduleDay,
+  upsertScheduleSlot,
+} from '@/src/schedule';
 import { addDays, hourLabel, hourSlot, hoursRange, slotStartMs as slotStartMsUtil, startOfDay, toYmd } from '@/src/time';
+import type { ScheduleDay, ScheduleSlot } from '@/src/types';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, getDocs, onSnapshot, runTransaction } from 'firebase/firestore';
+import { doc, runTransaction } from 'firebase/firestore';
 
 type SlotRow = { slot: string; label: string; bookedBy?: string };
 
@@ -14,6 +25,7 @@ export default function ScheduleScreen() {
   const [busySlot, setBusySlot] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const isFocused = useIsFocused();
 
   const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
   const date = useMemo(() => toYmd(selectedDay), [selectedDay]);
@@ -50,14 +62,11 @@ export default function ScheduleScreen() {
     return () => clearInterval(t);
   }, []);
 
-  function setFromSnapshot(docs: Array<{ id: string; data: any }>) {
-    const booked = new Map<string, any>();
-    docs.forEach((d) => booked.set(d.id, d.data));
-
+  function setFromSnapshot(day: ScheduleDay) {
     setRows(
       hours.map((h) => {
         const slot = hourSlot(h);
-        const b = booked.get(slot);
+        const b = day.slots[slot];
         return { slot, label: hourLabel(h), bookedBy: b?.name };
       })
     );
@@ -66,9 +75,7 @@ export default function ScheduleScreen() {
   async function refreshOnce() {
     try {
       setLoadError(null);
-      const ref = collection(db, 'schedule', date, 'slots');
-      const snap = await getDocs(ref);
-      setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
+      setFromSnapshot(await loadScheduleDay(date));
     } catch (e) {
       console.warn('[ScheduleScreen] Refresh failed', e);
       setLoadError('Could not refresh schedule right now.');
@@ -81,24 +88,46 @@ export default function ScheduleScreen() {
 
   useEffect(() => {
     if (!uid) {
+      setRows([]);
       setLoadError(null);
       return;
     }
-    setRows([]);
-    const ref = collection(db, 'schedule', date, 'slots');
-    const unsub = onSnapshot(
-      ref,
-      (snap) => {
+    if (!isFocused) return;
+
+    let active = true;
+    let unsub: (() => void) | undefined;
+
+    void subscribeToScheduleDay(
+      date,
+      (day) => {
+        if (!active) return;
         setLoadError(null);
-        setFromSnapshot(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
+        setFromSnapshot(day);
       },
       (e) => {
+        if (!active) return;
         console.warn('[ScheduleScreen] Live schedule subscription failed', e);
         setLoadError('Could not load schedule right now.');
       }
-    );
-    return unsub;
-  }, [uid, date]);
+    )
+      .then((nextUnsub) => {
+        if (active) {
+          unsub = nextUnsub;
+          return;
+        }
+        nextUnsub();
+      })
+      .catch((e) => {
+        if (!active) return;
+        console.warn('[ScheduleScreen] Live schedule subscription failed', e);
+        setLoadError('Could not load schedule right now.');
+      });
+
+    return () => {
+      active = false;
+      unsub?.();
+    };
+  }, [uid, date, isFocused]);
 
   async function book(slot: string) {
     const u = auth.currentUser;
@@ -111,24 +140,33 @@ export default function ScheduleScreen() {
 
     try {
       setBusySlot(slot);
-      const slotRef = doc(db, 'schedule', date, 'slots', slot);
+      const backend = await detectScheduleBackend(date);
       const bookingRef = doc(db, 'bookings', `${date}_${slot}_${u.uid}`);
+      const payload: ScheduleSlot = {
+        date,
+        slot,
+        userId: u.uid,
+        name: u.displayName || u.email || 'User',
+        email: u.email || '',
+        createdAt: Date.now(),
+      };
 
       await runTransaction(db, async (tx) => {
-        const existing = await tx.get(slotRef);
-        if (existing.exists()) throw new Error('This slot is already booked.');
-        await assertCanBookInTransaction(tx, u.uid, date, slot);
+        if (backend === 'legacy-slot-subcollection') {
+          const slotRef = scheduleSlotRef(date, slot);
+          const existing = await tx.get(slotRef);
+          if (existing.exists()) throw new Error('This slot is already booked.');
+          await assertCanBookInTransaction(tx, u.uid, date, slot);
+          tx.set(slotRef, payload);
+        } else {
+          const dayRef = scheduleDayRef(date);
+          const daySnap = await tx.get(dayRef);
+          const day = normalizeScheduleDay(daySnap.data());
+          if (day.slots[slot]) throw new Error('This slot is already booked.');
+          await assertCanBookInTransaction(tx, u.uid, date, slot);
+          tx.set(dayRef, { slots: upsertScheduleSlot(day.slots, slot, payload) });
+        }
 
-        const payload = {
-          date,
-          slot,
-          userId: u.uid,
-          name: u.displayName || u.email || 'User',
-          email: u.email || '',
-          createdAt: Date.now(),
-        };
-
-        tx.set(slotRef, payload);
         tx.set(bookingRef, payload);
       });
 

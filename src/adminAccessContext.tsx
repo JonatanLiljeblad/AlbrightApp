@@ -7,6 +7,7 @@ export type AdminAccessContextValue = {
   owner: boolean;
   canAdmin: boolean;
   pendingRequests: AccessRequest[];
+  refreshPendingRequests: () => Promise<void>;
 };
 
 const AdminAccessContext = createContext<AdminAccessContextValue | null>(null);

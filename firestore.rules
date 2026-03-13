@@ -46,31 +46,36 @@ service cloud.firestore {
       return date + '_' + slot + '_' + uid;
     }
 
-    function schedulePath(date, slot) {
-      return /databases/$(database)/documents/schedule/$(date)/slots/$(slot);
+    function scheduleDayPath(date) {
+      return /databases/$(database)/documents/schedule/$(date);
     }
 
     function bookingPath(date, slot, uid) {
       return /databases/$(database)/documents/bookings/$(bookingIdFor(date, slot, uid));
     }
 
-    function isBookingPayload(d, ymd, slotId) {
+    function isStoredBookingPayload(d, ymd, slotId) {
       return d.keys().hasOnly(['date', 'slot', 'userId', 'name', 'email', 'createdAt'])
         && validYmd(d.date)
         && validSlot(d.slot)
         && d.date == ymd
         && d.slot == slotId
-        && d.userId == request.auth.uid
+        && d.userId is string
         && d.name is string
         && d.name.size() >= 1
         && d.name.size() <= 80
         && d.email is string
         && validEmail(d.email)
-        && d.email.lower() == emailLower()
         && d.createdAt is int;
     }
 
-    function isReservationPayload(d, ymd, slotId) {
+    function isBookingPayload(d, ymd, slotId) {
+      return isStoredBookingPayload(d, ymd, slotId)
+        && d.userId == request.auth.uid
+        && d.email.lower() == emailLower();
+    }
+
+    function isStoredReservationPayload(d, ymd, slotId) {
       return d.keys().hasOnly([
           'date', 'slot', 'userId', 'name', 'email', 'createdAt',
           'reservedByRole', 'reservedByUid', 'reason'
@@ -79,23 +84,107 @@ service cloud.firestore {
         && validSlot(d.slot)
         && d.date == ymd
         && d.slot == slotId
-        && d.userId == request.auth.uid
+        && d.userId is string
         && d.name is string
         && d.name.size() >= 1
         && d.name.size() <= 80
         && d.email is string
         && validEmail(d.email)
-        && d.email.lower() == emailLower()
         && d.createdAt is int
-        && d.reservedByUid == request.auth.uid
-        && d.reservedByRole is string
-        && (
-          (d.reservedByRole == 'owner' && isOwner())
-          || (d.reservedByRole == 'admin' && !isOwner() && isAdmin())
-        )
+        && d.reservedByUid is string
+        && d.reservedByRole in ['owner', 'admin']
         && d.reason is string
         && d.reason.size() >= 1
         && d.reason.size() <= 120;
+    }
+
+    function isReservationPayload(d, ymd, slotId) {
+      return isStoredReservationPayload(d, ymd, slotId)
+        && d.userId == request.auth.uid
+        && d.email.lower() == emailLower()
+        && d.reservedByUid == request.auth.uid
+        && (
+          (d.reservedByRole == 'owner' && isOwner())
+          || (d.reservedByRole == 'admin' && !isOwner() && isAdmin())
+        );
+    }
+
+    function validScheduleDayShape(d) {
+      return d.keys().hasOnly(['slots'])
+        && d.slots is map
+        && d.slots.keys().hasOnly([
+          '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00',
+          '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'
+        ]);
+    }
+
+    function beforeScheduleSlots() {
+      return resource == null || !(resource.data.slots is map)
+        ? {}
+        : resource.data.slots;
+    }
+
+    function addedSlotCount() {
+      return request.resource.data.slots.diff(beforeScheduleSlots()).addedKeys().size();
+    }
+
+    function removedSlotCount() {
+      return request.resource.data.slots.diff(beforeScheduleSlots()).removedKeys().size();
+    }
+
+    function onlySlotAffected(slotId) {
+      return request.resource.data.slots.diff(beforeScheduleSlots()).affectedKeys().hasOnly([slotId]);
+    }
+
+    function slotAdded(slotId) {
+      return !(slotId in beforeScheduleSlots()) && slotId in request.resource.data.slots;
+    }
+
+    function slotRemoved(slotId) {
+      return (slotId in beforeScheduleSlots()) && !(slotId in request.resource.data.slots);
+    }
+
+    function changedSlotCount() {
+      return request.resource.data.slots.diff(beforeScheduleSlots()).changedKeys().size();
+    }
+
+    function scheduleSlotAfter(date, slot) {
+      return getAfter(scheduleDayPath(date)).data.slots[slot];
+    }
+
+    function isBookingAdditionForSlot(ymd, slotId) {
+      return onlySlotAffected(slotId)
+        && slotAdded(slotId)
+        && isBookingPayload(request.resource.data.slots[slotId], ymd, slotId)
+        && existsAfter(bookingPath(ymd, slotId, request.auth.uid));
+    }
+
+    function isSingleBookingAddition(ymd) {
+      return isBookingAdditionForSlot(ymd, '08:00')
+        || isBookingAdditionForSlot(ymd, '09:00')
+        || isBookingAdditionForSlot(ymd, '10:00')
+        || isBookingAdditionForSlot(ymd, '11:00')
+        || isBookingAdditionForSlot(ymd, '12:00')
+        || isBookingAdditionForSlot(ymd, '13:00')
+        || isBookingAdditionForSlot(ymd, '14:00')
+        || isBookingAdditionForSlot(ymd, '15:00')
+        || isBookingAdditionForSlot(ymd, '16:00')
+        || isBookingAdditionForSlot(ymd, '17:00')
+        || isBookingAdditionForSlot(ymd, '18:00')
+        || isBookingAdditionForSlot(ymd, '19:00')
+        || isBookingAdditionForSlot(ymd, '20:00');
+    }
+
+    function isAdminSingleSlotWrite() {
+      return isAdmin()
+        && request.resource.data.slots.diff(beforeScheduleSlots()).affectedKeys().size() == 1;
+    }
+
+    function isAllowedSingleSlotRemoval() {
+      return !isAdmin()
+        && addedSlotCount() == 0
+        && removedSlotCount() == 1
+        && changedSlotCount() == 0;
     }
 
     // --- bookingGuards validation helpers ---
@@ -225,36 +314,35 @@ service cloud.firestore {
       allow delete: if isOwner();
     }
 
-    // Allow collection group reads for "slots" (used by Current Reservations).
-    match /{path=**}/slots/{slot} {
+    // Schedule days
+    match /schedule/{date} {
       allow read: if isAllowed();
-    }
-
-    // Schedule slots
-    match /schedule/{date}/slots/{slot} {
-      allow read: if isAllowed();
-      allow update: if false;
+      allow delete: if false;
 
       allow create: if isAllowed()
-        && !exists(schedulePath(date, slot))
+        && validYmd(date)
+        && validScheduleDayShape(request.resource.data)
         && (
-          (
-            isBookingPayload(request.resource.data, date, slot)
-            && !exists(bookingPath(date, slot, request.auth.uid))
-            && existsAfter(bookingPath(date, slot, request.auth.uid))
-            && isBookingPayload(getAfter(bookingPath(date, slot, request.auth.uid)).data, date, slot)
-            && getAfter(bookingPath(date, slot, request.auth.uid)).data.name == request.resource.data.name
-            && getAfter(bookingPath(date, slot, request.auth.uid)).data.email == request.resource.data.email
-            && getAfter(bookingPath(date, slot, request.auth.uid)).data.createdAt == request.resource.data.createdAt
-          )
-          || (
-            isAdmin() && isReservationPayload(request.resource.data, date, slot)
-          )
+          isSingleBookingAddition(date)
+          || isAdminSingleSlotWrite()
         );
 
-      allow delete: if signedIn() && (
-        resource.data.userId == request.auth.uid || isAdmin()
-      );
+      allow update: if isAllowed()
+        && !isAdmin()
+        && validYmd(date)
+        && validScheduleDayShape(request.resource.data)
+        && addedSlotCount() == 1
+        && removedSlotCount() == 0
+        && changedSlotCount() == 0
+        && isSingleBookingAddition(date);
+
+      allow update: if isAllowed()
+        && validYmd(date)
+        && validScheduleDayShape(request.resource.data)
+        && (
+          isAdminSingleSlotWrite()
+          || isAllowedSingleSlotRemoval()
+        );
     }
 
     // Bookings
@@ -264,22 +352,18 @@ service cloud.firestore {
       );
       allow update: if false;
 
-      // Note: atomicity is enforced from the schedule-slot side:
+      // Note: atomicity is enforced from the schedule-day side:
       // creating a schedule slot requires the matching booking doc in the same batch/transaction.
       allow create: if isAllowed()
         && isBookingPayload(request.resource.data, request.resource.data.date, request.resource.data.slot)
         && bookingId == bookingIdFor(request.resource.data.date, request.resource.data.slot, request.auth.uid)
-        && !exists(schedulePath(request.resource.data.date, request.resource.data.slot))
-        && existsAfter(schedulePath(request.resource.data.date, request.resource.data.slot))
-        && isBookingPayload(
-          getAfter(schedulePath(request.resource.data.date, request.resource.data.slot)).data,
-          request.resource.data.date,
-          request.resource.data.slot
-        )
-        && getAfter(schedulePath(request.resource.data.date, request.resource.data.slot)).data.userId == request.auth.uid
-        && getAfter(schedulePath(request.resource.data.date, request.resource.data.slot)).data.name == request.resource.data.name
-        && getAfter(schedulePath(request.resource.data.date, request.resource.data.slot)).data.email == request.resource.data.email
-        && getAfter(schedulePath(request.resource.data.date, request.resource.data.slot)).data.createdAt == request.resource.data.createdAt;
+        && existsAfter(scheduleDayPath(request.resource.data.date))
+        && scheduleSlotAfter(request.resource.data.date, request.resource.data.slot).date == request.resource.data.date
+        && scheduleSlotAfter(request.resource.data.date, request.resource.data.slot).slot == request.resource.data.slot
+        && scheduleSlotAfter(request.resource.data.date, request.resource.data.slot).userId == request.auth.uid
+        && scheduleSlotAfter(request.resource.data.date, request.resource.data.slot).name == request.resource.data.name
+        && scheduleSlotAfter(request.resource.data.date, request.resource.data.slot).email == request.resource.data.email
+        && scheduleSlotAfter(request.resource.data.date, request.resource.data.slot).createdAt == request.resource.data.createdAt;
 
       allow delete: if signedIn() && (
         resource.data.userId == request.auth.uid || isAdmin()

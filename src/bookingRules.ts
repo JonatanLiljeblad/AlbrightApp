@@ -1,11 +1,9 @@
 import { collection, doc, getDoc, getDocs, query, setDoc, type Transaction, where } from 'firebase/firestore';
 import { db } from './firebase';
 import { slotEndMs } from './time';
-import type { Booking } from './types';
+import type { ActiveBookingGuard, Booking } from './types';
 
 type CanBookResult = { ok: true } | { ok: false; reason: string };
-type ActiveBookingGuard = { id: string; date: string; slot: string; endMs: number };
-
 function evaluateBookingCaps(bookings: Booking[], date: string, now: number): CanBookResult {
   let active = 0;
   let dailyActive = 0;
@@ -33,7 +31,7 @@ export async function canBook(userId: string, date: string) {
   return evaluateBookingCaps(byUser.docs.map((d) => d.data() as Booking), date, now);
 }
 
-function normalizeActiveGuard(value: unknown, now: number): ActiveBookingGuard[] {
+export function normalizeActiveGuard(value: unknown, now: number): ActiveBookingGuard[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter((item): item is ActiveBookingGuard => {
