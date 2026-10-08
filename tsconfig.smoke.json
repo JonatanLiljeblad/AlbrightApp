@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "node16",
+    "outDir": ".smoke-build",
+    "rootDir": ".",
+    "strict": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "scripts/firestore-emulator-smoke.ts",
+    "src/bookingRules.ts",
+    "src/schedule.ts",
+    "src/scheduleActions.ts",
+    "src/time.ts",
+    "src/types.ts"
+  ]
+}

@@ -1,15 +1,12 @@
 import { auth, db } from "@/src/firebase";
 import {
-  detectScheduleBackend,
+  reserveScheduleSlots,
+  unreserveScheduleSlot,
+} from "@/src/scheduleActions";
+import {
   isReservationSlot,
-  loadScheduleDay,
   loadScheduleReservations,
-  normalizeScheduleDay,
-  removeScheduleSlot,
-  scheduleDayRef,
-  scheduleSlotRef,
   subscribeToScheduleDay,
-  upsertScheduleSlot,
 } from "@/src/schedule";
 import {
   addDays,
@@ -20,10 +17,6 @@ import {
   startOfDay,
   toYmd,
 } from "@/src/time";
-import {
-  deleteDoc,
-  runTransaction,
-} from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -130,6 +123,7 @@ export default function ReserveDialog({
         console.warn("[ReserveDialog] Failed loading schedule slots", e);
         setLoadError("Could not load schedule data.");
       },
+      db,
     )
       .then((nextUnsub) => {
         if (active) {
@@ -156,7 +150,7 @@ export default function ReserveDialog({
     async function loadReservations() {
       try {
         setLoadError(null);
-        setReservationData(await loadScheduleReservations(todayYmd));
+        setReservationData(await loadScheduleReservations(todayYmd, db));
       } catch (e) {
         console.warn("[ReserveDialog] Failed loading reservations", e);
         setLoadError("Could not load reservation data.");
@@ -190,77 +184,23 @@ export default function ReserveDialog({
     try {
       setBusy(true);
       const slots = Array.from(selected).sort();
-      const backend = await detectScheduleBackend(date);
-      const reason = title.trim();
       const passed = slots.filter((slot) => isPastSlot(slot, Date.now()));
       if (passed.length > 0) {
         throw new Error(`Slot(s) ${passed.join(", ")} have already passed.`);
       }
 
-      const createdAt = Date.now();
-      if (backend === "legacy-slot-subcollection") {
-        await runTransaction(db, async (tx) => {
-          const reads = await Promise.all(
-            slots.map(async (slot) => {
-              const slotRef = scheduleSlotRef(date, slot);
-              const snap = await tx.get(slotRef);
-              return { slot, exists: snap.exists(), slotRef };
-            }),
-          );
-
-          const taken = reads.filter((entry) => entry.exists);
-          if (taken.length > 0) {
-            throw new Error(
-              `Slot(s) ${taken.map((entry) => entry.slot).join(", ")} already taken.`,
-            );
-          }
-
-          for (const { slot, slotRef } of reads) {
-            tx.set(slotRef, {
-              date,
-              slot,
-              userId: u.uid,
-              name: reason,
-              email: u.email || "",
-              createdAt,
-              reservedByRole,
-              reservedByUid: u.uid,
-              reason,
-            });
-          }
-        });
-      } else {
-        const dayRef = scheduleDayRef(date);
-        const day = await loadScheduleDay(date);
-        const taken = slots.filter((slot) => day.slots[slot]);
-        if (taken.length > 0) {
-          throw new Error(`Slot(s) ${taken.join(", ")} already taken.`);
-        }
-
-        for (const slot of slots) {
-          await runTransaction(db, async (tx) => {
-            const currentSnap = await tx.get(dayRef);
-            const currentDay = normalizeScheduleDay(currentSnap.data());
-            if (currentDay.slots[slot]) {
-              throw new Error(`Slot ${slot} was taken while reserving.`);
-            }
-
-            tx.set(dayRef, {
-              slots: upsertScheduleSlot(currentDay.slots, slot, {
-                date,
-                slot,
-                userId: u.uid,
-                name: reason,
-                email: u.email || "",
-                createdAt,
-                reservedByRole,
-                reservedByUid: u.uid,
-                reason,
-              }),
-            });
-          });
-        }
-      }
+      await reserveScheduleSlots({
+        db,
+        user: {
+          uid: u.uid,
+          email: u.email,
+          displayName: u.displayName,
+        },
+        date,
+        slots,
+        reason: title,
+        reservedByRole,
+      });
 
       setSelected(new Set());
       setTitle("");
@@ -275,21 +215,7 @@ export default function ReserveDialog({
   async function unreserve(resDate: string, slot: string) {
     try {
       setBusy(true);
-      const backend = await detectScheduleBackend(resDate);
-      if (backend === "legacy-slot-subcollection") {
-        await deleteDoc(scheduleSlotRef(resDate, slot));
-      } else {
-        await runTransaction(db, async (tx) => {
-          const dayRef = scheduleDayRef(resDate);
-          const daySnap = await tx.get(dayRef);
-          if (!daySnap.exists()) return;
-
-          const day = normalizeScheduleDay(daySnap.data());
-          if (!day.slots[slot]) return;
-
-          tx.set(dayRef, { slots: removeScheduleSlot(day.slots, slot) });
-        });
-      }
+      await unreserveScheduleSlot({ db, date: resDate, slot });
       setReservationData((prev) =>
         prev.filter((item) => !(item.date === resDate && item.slot === slot)),
       );

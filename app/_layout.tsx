@@ -1,7 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { DarkTheme as NavDark, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useMemo, useState } from 'react';
 import 'react-native-reanimated';
@@ -91,9 +90,9 @@ function RootLayoutNav() {
 
   const navTheme = useMemo(
     () => ({
-      ...NavDark,
+      ...DarkTheme,
       colors: {
-        ...NavDark.colors,
+        ...DarkTheme.colors,
         primary: '#D7263D',
         background: '#000000',
         card: '#0B0B0B',

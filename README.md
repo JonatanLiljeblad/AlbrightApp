@@ -24,9 +24,19 @@ npm i
 
 4) Run
 ```bash
+npm start
+```
+
+This opens an Expo Go-compatible development server. Install **Expo Go** on your
+iOS or Android device, ensure the device and computer are on the same network,
+then scan the QR code. Use `npm start -- --tunnel` when local-network discovery
+is unavailable.
+
+For native simulator or development-build workflows, use:
+```bash
 npm run ios
-# or
 npm run android
+npm run start:dev-client
 ```
 
 ## Verification
@@ -34,7 +44,7 @@ npm run android
 ```bash
 npm run typecheck
 npm run rules:smoke            # Requires Auth + Firestore emulators already running
-npm run rules:smoke:emulators  # Starts the emulators for the smoke script
+npm run rules:smoke:emulators  # Starts the emulators for the smoke checks
 npm run verify                 # Typecheck + emulator-backed smoke checks
 ```
 
@@ -68,7 +78,7 @@ To use it, paste `firestore.rules` into Firebase Console → Firestore Database 
 ## Notes
 MVP enforces slot exclusivity with a Firestore transaction; advanced constraints should be moved to Security Rules / Cloud Functions.
 
-## Emulator smoke checks (rules)
+## Emulator smoke checks
 Run with Firestore + Auth emulators already running:
 ```bash
 npm run rules:smoke
@@ -80,6 +90,8 @@ npm run rules:smoke:emulators
 ```
 
 GitHub Actions uses `npm run verify` so local verification can match CI.
+
+The emulator smoke checks now cover both Firestore rules expectations and the shared booking/reservation app flows used by the schedule screens.
 
 Migration note:
 - Existing deployments can leave `bookingGuards` empty; they are rebuilt as users book/unbook. Existing booking docs remain source-of-truth for legacy data checks.

@@ -1,19 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused } from 'expo-router';
 import { Alert, StyleSheet } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
-import { hydrateBookingGuardIfNeeded, normalizeActiveGuard, removeBookingFromGuardInTransaction } from '@/src/bookingRules';
+import { hydrateBookingGuardIfNeeded, normalizeActiveGuard } from '@/src/bookingRules';
 import { auth, db } from '@/src/firebase';
-import {
-  detectScheduleBackend,
-  normalizeScheduleDay,
-  removeScheduleSlot,
-  scheduleDayRef,
-  scheduleSlotRef,
-} from '@/src/schedule';
+import { unbookScheduleSlot } from '@/src/scheduleActions';
 import type { ActiveBookingGuard } from '@/src/types';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, onSnapshot, runTransaction } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 export default function MyBookingsScreen() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -36,7 +30,7 @@ export default function MyBookingsScreen() {
 
     if (!hydratedGuardUids.current.has(uid)) {
       hydratedGuardUids.current.add(uid);
-      void hydrateBookingGuardIfNeeded(uid).catch((e) => {
+      void hydrateBookingGuardIfNeeded(uid, Date.now(), db).catch((e) => {
         console.warn('[MyBookingsScreen] Guard hydration failed', e);
         setLoadError('Could not load your bookings right now.');
       });
@@ -69,44 +63,10 @@ export default function MyBookingsScreen() {
 
     try {
       setBusyKey(key);
-      const backend = await detectScheduleBackend(b.date);
-      const bookingRef = doc(db, 'bookings', b.id);
-
-      await runTransaction(db, async (tx) => {
-        if (backend === 'legacy-slot-subcollection') {
-          const slotRef = scheduleSlotRef(b.date, b.slot);
-          const slotSnap = await tx.get(slotRef);
-          const slotData = slotSnap.data() as { userId?: unknown } | undefined;
-          if (typeof slotData?.userId === 'string' && slotData.userId !== u.uid) {
-            throw new Error('You can only unbook your own slot.');
-          }
-          await removeBookingFromGuardInTransaction(tx, u.uid, b.date, b.slot);
-          if (slotSnap.exists()) {
-            tx.delete(slotRef);
-          }
-        } else {
-          const dayRef = scheduleDayRef(b.date);
-          const daySnap = await tx.get(dayRef);
-          let nextSlots: ReturnType<typeof removeScheduleSlot> | null = null;
-          let shouldUpdateDay = false;
-          if (daySnap.exists()) {
-            const day = normalizeScheduleDay(daySnap.data());
-            const data = day.slots[b.slot];
-            if (data?.userId && data.userId !== u.uid) {
-              throw new Error('You can only unbook your own slot.');
-            }
-            nextSlots = removeScheduleSlot(day.slots, b.slot);
-            shouldUpdateDay = nextSlots !== day.slots;
-          }
-
-          await removeBookingFromGuardInTransaction(tx, u.uid, b.date, b.slot);
-
-          if (daySnap.exists() && nextSlots && shouldUpdateDay) {
-            tx.set(dayRef, { slots: nextSlots });
-          }
-        }
-
-        tx.delete(bookingRef);
+      await unbookScheduleSlot({
+        db,
+        userId: u.uid,
+        booking: b,
       });
     } catch (e: any) {
       console.warn('[MyBookingsScreen] Unbook failed', e);

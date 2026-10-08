@@ -11,10 +11,10 @@ npm start              # Expo dev server
 npm run ios            # Run on iOS simulator
 npm run android        # Run on Android emulator
 npm run typecheck      # TypeScript strict check (tsc --noEmit)
-npm run rules:smoke    # Firestore security rules smoke tests (requires Firebase emulators running)
+npm run rules:smoke    # Emulator-backed Firestore smoke checks (requires Firebase emulators running)
 ```
 
-There is no unit test framework. The only automated tests are the Firestore rules smoke checks in `scripts/firestore-emulator-smoke.mjs`, which run against the Firebase Auth + Firestore emulators.
+There is no unit test framework. The only automated tests are the emulator-backed smoke checks in `scripts/firestore-emulator-smoke.ts`, which run against the Firebase Auth + Firestore emulators and cover rules plus shared booking/reservation flows.
 
 ## Architecture
 

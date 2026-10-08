@@ -36,6 +36,7 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+.smoke-build/
 
 # generated native folders
 /ios

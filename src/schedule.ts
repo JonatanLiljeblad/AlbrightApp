@@ -9,10 +9,9 @@ import {
   orderBy,
   query,
   where,
+  type Firestore,
   type Unsubscribe,
 } from 'firebase/firestore';
-
-import { db } from './firebase';
 import type { ScheduleDay, ScheduleSlot } from './types';
 
 export type ScheduleBackend = 'day-doc' | 'legacy-slot-subcollection';
@@ -22,16 +21,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-export function scheduleDayRef(date: string) {
-  return doc(db, 'schedule', date);
+export function scheduleDayRef(date: string, firestore: Firestore) {
+  return doc(firestore, 'schedule', date);
 }
 
-export function scheduleSlotsCollection(date: string) {
-  return collection(db, 'schedule', date, 'slots');
+export function scheduleSlotsCollection(date: string, firestore: Firestore) {
+  return collection(firestore, 'schedule', date, 'slots');
 }
 
-export function scheduleSlotRef(date: string, slot: string) {
-  return doc(db, 'schedule', date, 'slots', slot);
+export function scheduleSlotRef(date: string, slot: string, firestore: Firestore) {
+  return doc(firestore, 'schedule', date, 'slots', slot);
 }
 
 export function isPermissionDeniedError(error: unknown) {
@@ -105,23 +104,26 @@ export function removeScheduleSlot(slots: Record<string, ScheduleSlot>, slot: st
   return next;
 }
 
-async function loadLegacyScheduleDay(date: string): Promise<ScheduleDay> {
-  const snap = await getDocs(scheduleSlotsCollection(date));
+async function loadLegacyScheduleDay(date: string, firestore: Firestore): Promise<ScheduleDay> {
+  const snap = await getDocs(scheduleSlotsCollection(date, firestore));
   return scheduleDayFromEntries(
     snap.docs.map((slotDoc) => [slotDoc.id, slotDoc.data()] as const),
   );
 }
 
-export async function detectScheduleBackend(date: string): Promise<ScheduleBackend> {
+export async function detectScheduleBackend(
+  date: string,
+  firestore: Firestore,
+): Promise<ScheduleBackend> {
   try {
-    const daySnap = await getDoc(scheduleDayRef(date));
+    const daySnap = await getDoc(scheduleDayRef(date, firestore));
     const day = normalizeScheduleDay(daySnap.data());
     if (daySnap.exists() && Object.keys(day.slots).length > 0) {
       return 'day-doc';
     }
 
     try {
-      const legacyDay = await loadLegacyScheduleDay(date);
+      const legacyDay = await loadLegacyScheduleDay(date, firestore);
       return Object.keys(legacyDay.slots).length > 0
         ? 'legacy-slot-subcollection'
         : 'day-doc';
@@ -139,13 +141,13 @@ export async function detectScheduleBackend(date: string): Promise<ScheduleBacke
   }
 }
 
-export async function loadScheduleDay(date: string): Promise<ScheduleDay> {
-  const backend = await detectScheduleBackend(date);
+export async function loadScheduleDay(date: string, firestore: Firestore): Promise<ScheduleDay> {
+  const backend = await detectScheduleBackend(date, firestore);
   if (backend === 'legacy-slot-subcollection') {
-    return loadLegacyScheduleDay(date);
+    return loadLegacyScheduleDay(date, firestore);
   }
 
-  const snap = await getDoc(scheduleDayRef(date));
+  const snap = await getDoc(scheduleDayRef(date, firestore));
   return normalizeScheduleDay(snap.data());
 }
 
@@ -153,14 +155,15 @@ export async function subscribeToScheduleDay(
   date: string,
   onData: (day: ScheduleDay) => void,
   onError: (error: unknown) => void,
+  firestore: Firestore,
 ): Promise<Unsubscribe> {
-  const backend = await detectScheduleBackend(date);
+  const backend = await detectScheduleBackend(date, firestore);
 
   if (backend === 'legacy-slot-subcollection') {
-    const initialDay = await loadLegacyScheduleDay(date);
+    const initialDay = await loadLegacyScheduleDay(date, firestore);
     onData(initialDay);
     return onSnapshot(
-      scheduleSlotsCollection(date),
+      scheduleSlotsCollection(date, firestore),
       (snap) =>
         onData(
           scheduleDayFromEntries(
@@ -171,7 +174,7 @@ export async function subscribeToScheduleDay(
     );
   }
 
-  const dayRef = scheduleDayRef(date);
+  const dayRef = scheduleDayRef(date, firestore);
   const initialSnap = await getDoc(dayRef);
   onData(normalizeScheduleDay(initialSnap.data()));
   return onSnapshot(
@@ -190,9 +193,12 @@ function reservationsFromDay(date: string, day: ScheduleDay): ScheduleReservatio
   }, []);
 }
 
-async function loadLegacyScheduleReservations(startDate: string): Promise<ScheduleReservation[]> {
+async function loadLegacyScheduleReservations(
+  startDate: string,
+  firestore: Firestore,
+): Promise<ScheduleReservation[]> {
   const reservationsQ = query(
-    collectionGroup(db, 'slots'),
+    collectionGroup(firestore, 'slots'),
     where('reservedByRole', 'in', ['owner', 'admin']),
   );
   const snap = await getDocs(reservationsQ);
@@ -205,10 +211,13 @@ async function loadLegacyScheduleReservations(startDate: string): Promise<Schedu
   }, []);
 }
 
-export async function loadScheduleReservations(startDate: string): Promise<ScheduleReservation[]> {
+export async function loadScheduleReservations(
+  startDate: string,
+  firestore: Firestore,
+): Promise<ScheduleReservation[]> {
   try {
     const reservationsQ = query(
-      collection(db, 'schedule'),
+      collection(firestore, 'schedule'),
       where(documentId(), '>=', startDate),
       orderBy(documentId()),
     );
@@ -221,7 +230,7 @@ export async function loadScheduleReservations(startDate: string): Promise<Sched
     }
 
     try {
-      return await loadLegacyScheduleReservations(startDate);
+      return await loadLegacyScheduleReservations(startDate, firestore);
     } catch (legacyError) {
       if (isPermissionDeniedError(legacyError)) {
         return reservations;
@@ -232,6 +241,6 @@ export async function loadScheduleReservations(startDate: string): Promise<Sched
     if (!isPermissionDeniedError(error)) {
       throw error;
     }
-    return loadLegacyScheduleReservations(startDate);
+    return loadLegacyScheduleReservations(startDate, firestore);
   }
 }

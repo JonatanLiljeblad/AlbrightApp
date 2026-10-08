@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Tabs } from 'expo-router';
+import type { ColorValue } from 'react-native';
 
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import { isAdmin, isOwner, watchAuth } from '@/src/auth';
@@ -12,7 +13,7 @@ import { collection, doc, getDocs, onSnapshot, query, where } from 'firebase/fir
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
   name: React.ComponentProps<typeof FontAwesome>['name'];
-  color: string;
+  color: ColorValue;
 }) {
   return <FontAwesome size={28} style={{ marginBottom: -3 }} {...props} />;
 }

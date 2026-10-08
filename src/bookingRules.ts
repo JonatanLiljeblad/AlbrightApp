@@ -1,5 +1,4 @@
-import { collection, doc, getDoc, getDocs, query, setDoc, type Transaction, where } from 'firebase/firestore';
-import { db } from './firebase';
+import { collection, doc, getDoc, getDocs, query, setDoc, type Firestore, type Transaction, where } from 'firebase/firestore';
 import { slotEndMs } from './time';
 import type { ActiveBookingGuard, Booking } from './types';
 
@@ -24,9 +23,9 @@ function evaluateBookingCaps(bookings: Booking[], date: string, now: number): Ca
   return { ok: true };
 }
 
-export async function canBook(userId: string, date: string) {
+export async function canBook(userId: string, date: string, firestore: Firestore) {
   const now = Date.now();
-  const byUserQ = query(collection(db, 'bookings'), where('userId', '==', userId));
+  const byUserQ = query(collection(firestore, 'bookings'), where('userId', '==', userId));
   const byUser = await getDocs(byUserQ);
   return evaluateBookingCaps(byUser.docs.map((d) => d.data() as Booking), date, now);
 }
@@ -47,8 +46,8 @@ export function normalizeActiveGuard(value: unknown, now: number): ActiveBooking
     .filter((item) => Number.isFinite(item.endMs) && item.endMs > now);
 }
 
-function guardRef(userId: string) {
-  return doc(db, 'bookingGuards', userId);
+function guardRef(userId: string, firestore: Firestore) {
+  return doc(firestore, 'bookingGuards', userId);
 }
 
 /**
@@ -74,13 +73,13 @@ function guardRef(userId: string) {
  * relying on booking caps being enforced, and ensure guard documents remain
  * present and valid in normal operation.
  */
-export async function hydrateBookingGuardIfNeeded(userId: string, now = Date.now()) {
-  const ref = guardRef(userId);
+export async function hydrateBookingGuardIfNeeded(userId: string, now = Date.now(), firestore: Firestore) {
+  const ref = guardRef(userId, firestore);
   const snap = await getDoc(ref);
   const guardData = snap.data() as { active?: unknown; updatedAt?: unknown } | undefined;
   if (snap.exists() && Array.isArray(guardData?.active) && typeof guardData.updatedAt === 'number') return;
 
-  const byUserQ = query(collection(db, 'bookings'), where('userId', '==', userId));
+  const byUserQ = query(collection(firestore, 'bookings'), where('userId', '==', userId));
   const byUser = await getDocs(byUserQ);
   const active = byUser.docs
     .map((d) => {
@@ -109,9 +108,10 @@ export async function assertCanBookInTransaction(
   userId: string,
   date: string,
   slot: string,
-  now = Date.now()
+  now = Date.now(),
+  firestore: Firestore,
 ) {
-  const ref = guardRef(userId);
+  const ref = guardRef(userId, firestore);
   const snap = await tx.get(ref);
   const active = normalizeActiveGuard((snap.data() as { active?: unknown } | undefined)?.active, now);
 
@@ -145,9 +145,10 @@ export async function removeBookingFromGuardInTransaction(
   userId: string,
   date: string,
   slot: string,
-  now = Date.now()
+  now = Date.now(),
+  firestore: Firestore,
 ) {
-  const ref = guardRef(userId);
+  const ref = guardRef(userId, firestore);
   const snap = await tx.get(ref);
   const active = normalizeActiveGuard((snap.data() as { active?: unknown } | undefined)?.active, now);
   const bookingId = `${date}_${slot}_${userId}`;

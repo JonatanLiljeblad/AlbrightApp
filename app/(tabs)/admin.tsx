@@ -1,6 +1,6 @@
 import HistoryDialog from "@/components/HistoryDialog";
 import ReserveDialog from "@/components/ReserveDialog";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused } from "expo-router";
 import { useAdminAccess } from "@/src/adminAccessContext";
 import { auth, db } from "@/src/firebase";
 import type { AccessRequest } from "@/src/types";

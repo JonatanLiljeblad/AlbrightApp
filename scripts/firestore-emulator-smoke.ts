@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { deleteApp, initializeApp } from 'firebase/app';
 import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth } from 'firebase/auth';
 import {
@@ -12,6 +13,14 @@ import {
   setLogLevel,
   setDoc,
 } from 'firebase/firestore';
+
+import {
+  bookScheduleSlot,
+  reserveScheduleSlots,
+  unbookScheduleSlot,
+  unreserveScheduleSlot,
+} from '../src/scheduleActions';
+import { slotEndMs } from '../src/time';
 
 const projectId = process.env.FIREBASE_PROJECT_ID ?? 'demo-albright';
 const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8080';
@@ -91,6 +100,14 @@ function createClient(name) {
   const db = getFirestore(app);
   connectFirestoreEmulator(db, firestoreEmulatorHost, firestoreEmulatorPort);
   return { app, auth, db };
+}
+
+function actionUser(user, email, displayName = null) {
+  return {
+    uid: user.uid,
+    email,
+    displayName,
+  };
 }
 
 function emailDoc(email, createdBy) {
@@ -235,6 +252,10 @@ async function main() {
   const password = 'password123';
   const date = '2099-01-01';
   const nextDate = '2099-01-02';
+  const helperBookDate = '2099-01-03';
+  const helperUnbookDate = '2099-01-06';
+  const helperReserveDate = '2099-01-04';
+  const helperUnreserveDate = '2099-01-05';
 
   await flushFirestore();
 
@@ -249,7 +270,7 @@ async function main() {
     const ownerCred = await createUserWithEmailAndPassword(owner.auth, ownerEmail, password);
     const adminCred = await createUserWithEmailAndPassword(admin.auth, adminEmail, password);
     const userCred = await createUserWithEmailAndPassword(user.auth, userEmail, password);
-    await createUserWithEmailAndPassword(otherUser.auth, otherUserEmail, password);
+    const otherUserCred = await createUserWithEmailAndPassword(otherUser.auth, otherUserEmail, password);
     const outsiderCred = await createUserWithEmailAndPassword(outsider.auth, outsiderEmail, password);
 
     await adminPatchDoc(`owners/${ownerEmail}`, emailDoc(ownerEmail, ownerEmail));
@@ -520,6 +541,111 @@ async function main() {
       });
     });
 
+    await expectAllow('ALLOW shared booking helper creates booking, schedule slot, and guard', async () => {
+      await bookScheduleSlot({
+        db: otherUser.db,
+        user: actionUser(otherUserCred.user, otherUserEmail, 'Other User'),
+        date: helperBookDate,
+        slot: '09:00',
+      });
+
+      const bookingId = `${helperBookDate}_09:00_${otherUserCred.user.uid}`;
+      const [bookingSnap, daySnap, guardSnap] = await Promise.all([
+        getDoc(doc(otherUser.db, 'bookings', bookingId)),
+        getDoc(scheduleDayRef(otherUser.db, helperBookDate)),
+        getDoc(doc(otherUser.db, 'bookingGuards', otherUserCred.user.uid)),
+      ]);
+
+      if (!bookingSnap.exists()) throw new Error('Shared booking helper did not create booking doc.');
+      if (!daySnap.exists() || !daySnap.data().slots?.['09:00']) {
+        throw new Error('Shared booking helper did not create schedule slot.');
+      }
+      if (!guardSnap.exists() || !Array.isArray(guardSnap.data().active) || guardSnap.data().active.length !== 1) {
+        throw new Error('Shared booking helper did not create booking guard entry.');
+      }
+    });
+
+    await expectDeny('DENY shared booking helper without allowlist', async () => {
+      await bookScheduleSlot({
+        db: outsider.db,
+        user: actionUser(outsiderCred.user, outsiderEmail, 'Outsider User'),
+        date: helperBookDate,
+        slot: '10:00',
+      });
+    });
+
+    await expectAllow('ALLOW shared unbook helper removes booking, schedule slot, and guard', async () => {
+      await bookScheduleSlot({
+        db: otherUser.db,
+        user: actionUser(otherUserCred.user, otherUserEmail, 'Other User'),
+        date: helperUnbookDate,
+        slot: '10:00',
+      });
+
+      const bookingId = `${helperUnbookDate}_10:00_${otherUserCred.user.uid}`;
+      await unbookScheduleSlot({
+        db: otherUser.db,
+        userId: otherUserCred.user.uid,
+        booking: {
+          id: bookingId,
+          date: helperUnbookDate,
+          slot: '10:00',
+          endMs: slotEndMs(helperUnbookDate, '10:00'),
+        },
+      });
+
+      const [bookingSnap, daySnap, guardSnap] = await Promise.all([
+        getDoc(doc(otherUser.db, 'bookings', bookingId)),
+        getDoc(scheduleDayRef(otherUser.db, helperUnbookDate)),
+        getDoc(doc(otherUser.db, 'bookingGuards', otherUserCred.user.uid)),
+      ]);
+
+      if (bookingSnap.exists()) throw new Error('Shared unbook helper left booking doc behind.');
+      if (daySnap.data()?.slots?.['10:00']) throw new Error('Shared unbook helper left schedule slot behind.');
+      if ((guardSnap.data()?.active ?? []).some((entry) => entry?.id === bookingId)) {
+        throw new Error('Shared unbook helper left booking guard entry behind.');
+      }
+    });
+
+    await expectAllow('ALLOW shared admin reserve helper creates reservations', async () => {
+      await reserveScheduleSlots({
+        db: admin.db,
+        user: actionUser(adminCred.user, adminEmail, 'Admin User'),
+        date: helperReserveDate,
+        slots: ['13:00', '14:00'],
+        reason: 'Shared helper reserve',
+        reservedByRole: 'admin',
+      });
+
+      const daySnap = await getDoc(scheduleDayRef(admin.db, helperReserveDate));
+      const slots = daySnap.data()?.slots ?? {};
+      if (slots['13:00']?.reservedByRole !== 'admin' || slots['14:00']?.reservedByRole !== 'admin') {
+        throw new Error('Shared reserve helper did not create admin reservations.');
+      }
+    });
+
+    await expectAllow('ALLOW shared admin unreserve helper removes reservation', async () => {
+      await reserveScheduleSlots({
+        db: admin.db,
+        user: actionUser(adminCred.user, adminEmail, 'Admin User'),
+        date: helperUnreserveDate,
+        slots: ['15:00'],
+        reason: 'Shared helper unreserve',
+        reservedByRole: 'admin',
+      });
+
+      await unreserveScheduleSlot({
+        db: admin.db,
+        date: helperUnreserveDate,
+        slot: '15:00',
+      });
+
+      const daySnap = await getDoc(scheduleDayRef(admin.db, helperUnreserveDate));
+      if (daySnap.data()?.slots?.['15:00']) {
+        throw new Error('Shared unreserve helper left reservation slot behind.');
+      }
+    });
+
     await expectAllow('ALLOW user writing own booking guard (<=2)', async () => {
       await setDoc(doc(user.db, 'bookingGuards', userCred.user.uid), {
         updatedAt: Date.now(),
@@ -580,6 +706,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error('rules smoke test failed:', e);
+  console.error('emulator smoke test failed:', e);
   process.exitCode = 1;
 });

@@ -1,22 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused } from 'expo-router';
 import { Alert, FlatList, StyleSheet, View } from 'react-native';
 import { Button, Card, IconButton, ProgressBar, Text } from 'react-native-paper';
 import { auth, db } from '@/src/firebase';
-import { assertCanBookInTransaction } from '@/src/bookingRules';
+import { bookScheduleSlot } from '@/src/scheduleActions';
 import {
-  detectScheduleBackend,
   loadScheduleDay,
-  normalizeScheduleDay,
-  scheduleDayRef,
-  scheduleSlotRef,
   subscribeToScheduleDay,
-  upsertScheduleSlot,
 } from '@/src/schedule';
 import { addDays, hourLabel, hourSlot, hoursRange, slotStartMs as slotStartMsUtil, startOfDay, toYmd } from '@/src/time';
-import type { ScheduleDay, ScheduleSlot } from '@/src/types';
+import type { ScheduleDay } from '@/src/types';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, runTransaction } from 'firebase/firestore';
 
 type SlotRow = { slot: string; label: string; bookedBy?: string };
 
@@ -75,7 +69,7 @@ export default function ScheduleScreen() {
   async function refreshOnce() {
     try {
       setLoadError(null);
-      setFromSnapshot(await loadScheduleDay(date));
+      setFromSnapshot(await loadScheduleDay(date, db));
     } catch (e) {
       console.warn('[ScheduleScreen] Refresh failed', e);
       setLoadError('Could not refresh schedule right now.');
@@ -108,7 +102,8 @@ export default function ScheduleScreen() {
         if (!active) return;
         console.warn('[ScheduleScreen] Live schedule subscription failed', e);
         setLoadError('Could not load schedule right now.');
-      }
+      },
+      db,
     )
       .then((nextUnsub) => {
         if (active) {
@@ -140,36 +135,16 @@ export default function ScheduleScreen() {
 
     try {
       setBusySlot(slot);
-      const backend = await detectScheduleBackend(date);
-      const bookingRef = doc(db, 'bookings', `${date}_${slot}_${u.uid}`);
-      const payload: ScheduleSlot = {
+      await bookScheduleSlot({
+        db,
+        user: {
+          uid: u.uid,
+          email: u.email,
+          displayName: u.displayName,
+        },
         date,
         slot,
-        userId: u.uid,
-        name: u.displayName || u.email || 'User',
-        email: u.email || '',
-        createdAt: Date.now(),
-      };
-
-      await runTransaction(db, async (tx) => {
-        if (backend === 'legacy-slot-subcollection') {
-          const slotRef = scheduleSlotRef(date, slot);
-          const existing = await tx.get(slotRef);
-          if (existing.exists()) throw new Error('This slot is already booked.');
-          await assertCanBookInTransaction(tx, u.uid, date, slot);
-          tx.set(slotRef, payload);
-        } else {
-          const dayRef = scheduleDayRef(date);
-          const daySnap = await tx.get(dayRef);
-          const day = normalizeScheduleDay(daySnap.data());
-          if (day.slots[slot]) throw new Error('This slot is already booked.');
-          await assertCanBookInTransaction(tx, u.uid, date, slot);
-          tx.set(dayRef, { slots: upsertScheduleSlot(day.slots, slot, payload) });
-        }
-
-        tx.set(bookingRef, payload);
       });
-
     } catch (e: any) {
       console.warn('[ScheduleScreen] Booking failed', e);
       Alert.alert('Error', e?.message ?? 'Failed to book');
